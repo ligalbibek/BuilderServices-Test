@@ -490,15 +490,6 @@ const QS = [
   {id:7,  type:"number", text:"Enter approx. pipe depth in meters.",                       hint:"e.g. 1.5 — Access Passage will be calculated automatically"},
   {id:8,  type:"number", text:"What is the approx. sewer boundary offset? (m)",            hint:"Distance in metres from pipe centre to block boundary"},
   {id:9,  type:"choice", text:"Which boundary is the asset located?",                      hint:"Select one", options:["Front","Rear","North","West","East","South"], defaultVal:"Rear"},
-  {id:10, type:"text",   text:"Who is this email addressed to?",                           hint:"Name and/or job title"},
-  {id:11, type:"yesno",  text:"Is this a reply to an email you received?",                 hint:""},
-  {id:12, type:"text",   text:"What is the key message you want to get across?",           hint:"Be as detailed as you like"},
-  {id:13, type:"number", text:"How many days to respond?",                                  hint:"Enter 0 if there is no deadline"},
-  {id:14, type:"yesno",  text:"Should the tone be formal?",                                hint:""},
-  {id:15, type:"yesno",  text:"Does the recipient need to take action?",                   hint:""},
-  {id:16, type:"text",   text:"What outcome or next step are you hoping for?",             hint:"e.g. schedule a call, get approval"},
-  {id:17, type:"yesno",  text:"Do you want to mention a document or attachment?",          hint:""},
-  {id:18, type:"text",   text:"Your name and job title for the sign-off?",                 hint:"e.g. Jamie Chen, Senior Manager"},
 ];
 
 // Sewer infra answer is at index 3 (Q4). If No, Q5-Q9 are skipped.
@@ -620,7 +611,7 @@ function buildCrossSectionSVG(compact) {
 
   // SVG canvas — compact mode for sidebar, full mode for result screen
   const W  = compact ? 340 : 720;
-  const H  = compact ? 360 : 500;
+  const H  = compact ? 360 : 520;
   const mL = compact ? 54 : 110;
   const mR = compact ? 44 : 105;
   const mT = compact ? 36 : 44;
@@ -725,13 +716,46 @@ function buildCrossSectionSVG(compact) {
   // 45-deg boundary lines
   o('<line x1="' + (cx - pipeR) + '" y1="' + yInv + '" x2="' + zoiLx + '" y2="' + yGL + '" stroke="' + C.zoiStroke + '" stroke-width="1.5" stroke-dasharray="5,3"/>');
   o('<line x1="' + (cx + pipeR) + '" y1="' + yInv + '" x2="' + zoiRx + '" y2="' + yGL + '" stroke="' + C.zoiStroke + '" stroke-width="1.5" stroke-dasharray="5,3"/>');
-  // ZOI label — on the left angled line midpoint
-  const zoiMx = (cx - pipeR + zoiLx) / 2 - (compact ? 14 : 22);
-  const zoiMy = (yInv + yGL) / 2;
-  o('<text x="' + zoiMx + '" y="' + zoiMy + '" text-anchor="middle" font-size="' + (fs-1) + '" fill="' + C.zoiStroke + '" font-weight="600">Zone of</text>');
-  o('<text x="' + zoiMx + '" y="' + (zoiMy + fs + 1) + '" text-anchor="middle" font-size="' + (fs-1) + '" fill="' + C.zoiStroke + '" font-weight="600">Influence</text>');
-  // 45° angle label
-  o('<text x="' + (cx - pipeR - 4) + '" y="' + (yInv - 4) + '" text-anchor="end" font-size="' + (fs-1) + '" fill="' + C.zoiStroke + '">45°</text>');
+  // 45° angle label at pipe invert corner
+  o('<text x="' + (cx - pipeR - 5) + '" y="' + (yInv - 5) + '" text-anchor="end" font-size="' + (fs-1) + '" fill="' + C.zoiStroke + '">45°</text>');
+
+  // ── ZOI label: outside PPE to the LEFT with leader arrow ──────────────────
+  // Anchor point: midpoint of left ZOI boundary line
+  const zoiAnchorX = (cx - pipeR + zoiLx) / 2;
+  const zoiAnchorY = (yInv + yGL) / 2;
+  // Label sits left of left PPE edge, in the free soil zone
+  const zoiLabelX = compact ? Math.max(mL + 6, ppeL - 36) : Math.max(mL + 6, ppeL - 60);
+  const zoiLabelY = zoiAnchorY;
+  // Leader line from label to anchor point on ZOI line
+  o('<line x1="' + (zoiLabelX + (compact?30:52)) + '" y1="' + zoiLabelY + '" x2="' + (zoiAnchorX + 4) + '" y2="' + zoiAnchorY + '" stroke="' + C.zoiStroke + '" stroke-width="1" stroke-dasharray="3,2"/>');
+  // Arrowhead at anchor
+  o('<polygon points="' + zoiAnchorX + ',' + zoiAnchorY + ' ' + (zoiAnchorX+8) + ',' + (zoiAnchorY-3) + ' ' + (zoiAnchorX+8) + ',' + (zoiAnchorY+3) + '" fill="' + C.zoiStroke + '"/>');
+  // Label text
+  o('<text x="' + zoiLabelX + '" y="' + (zoiLabelY - 5) + '" text-anchor="start" font-size="' + (fs-1) + '" fill="' + C.zoiStroke + '" font-weight="bold">Zone of</text>');
+  o('<text x="' + zoiLabelX + '" y="' + (zoiLabelY + fs) + '" text-anchor="start" font-size="' + (fs-1) + '" fill="' + C.zoiStroke + '" font-weight="bold">Influence</text>');
+
+  // ── Struct. note: outside PPE to the RIGHT with leader arrow ──────────────
+  if (!compact) {
+    // Anchor: midpoint of right ZOI boundary line
+    const zoiRAnchorX = (cx + pipeR + zoiRx) / 2;
+    const zoiRAnchorY = (yInv + yGL) / 2;
+    // Label sits to the right of right PPE edge
+    const zoiRLabelX = ppeR2 + 8;
+    const zoiRLabelY = zoiRAnchorY;
+    // Leader line
+    o('<line x1="' + zoiRLabelX + '" y1="' + zoiRLabelY + '" x2="' + (zoiRAnchorX - 4) + '" y2="' + zoiRAnchorY + '" stroke="' + C.zoiStroke + '" stroke-width="1" stroke-dasharray="3,2"/>');
+    // Arrowhead
+    o('<polygon points="' + zoiRAnchorX + ',' + zoiRAnchorY + ' ' + (zoiRAnchorX-8) + ',' + (zoiRAnchorY-3) + ' ' + (zoiRAnchorX-8) + ',' + (zoiRAnchorY+3) + '" fill="' + C.zoiStroke + '"/>');
+    // Multi-line note
+    const noteLines = ['Structural solution', 'and details / certification', 'from licensed structural', 'engineer required'];
+    noteLines.forEach((line, idx) => {
+      o('<text x="' + zoiRLabelX + '" y="' + (zoiRLabelY - 20 + idx * 11) + '" text-anchor="start" font-size="8" fill="' + C.zoiStroke + '" font-style="italic">' + line + '</text>');
+    });
+  } else {
+    // Compact: short note below ZOI label
+    o('<text x="' + zoiLabelX + '" y="' + (zoiLabelY + fs*2 + 5) + '" text-anchor="start" font-size="7" fill="' + C.zoiStroke + '" font-style="italic">Struct. Eng.</text>');
+    o('<text x="' + zoiLabelX + '" y="' + (zoiLabelY + fs*3 + 6) + '" text-anchor="start" font-size="7" fill="' + C.zoiStroke + '" font-style="italic">cert. required</text>');
+  }
 
   // ── PPE envelope — underground portion (hatched + highlight) ─────────────
   o('<rect x="' + ppeL + '" y="' + yGL + '" width="' + (ppeR2 - ppeL) + '" height="' + (yInv - yGL) + '" fill="' + C.ppeHighlight + '"/>');
@@ -805,9 +829,10 @@ function buildCrossSectionSVG(compact) {
   o('<line x1="' + (depX-4) + '" y1="' + yGL + '" x2="' + (depX+4) + '" y2="' + yGL + '" stroke="' + C.dim + '" stroke-width="1.6"/>');
   o('<line x1="' + (depX-4) + '" y1="' + yInv + '" x2="' + (depX+4) + '" y2="' + yInv + '" stroke="' + C.dim + '" stroke-width="1.6"/>');
   // Label — centred on the dimension line
-  o('<text x="' + (depX + 5) + '" y="' + (depMid - 5) + '" font-size="' + fs + '" font-weight="bold" fill="' + C.dim + '">' + depth.toFixed(2) + 'm</text>');
+  o('<text x="' + (depX + 5) + '" y="' + (depMid - 14) + '" font-size="' + (fs-1) + '" fill="' + C.dim + '" font-style="italic">approx.</text>');
+  o('<text x="' + (depX + 5) + '" y="' + (depMid) + '" font-size="' + fs + '" font-weight="bold" fill="' + C.dim + '">' + depth.toFixed(2) + 'm</text>');
   if (!compact) {
-    o('<text x="' + (depX + 5) + '" y="' + (depMid + 8) + '" font-size="8" fill="' + C.dim + '">NGL–Invert</text>');
+    o('<text x="' + (depX + 5) + '" y="' + (depMid + 13) + '" font-size="8" fill="' + C.dim + '">NGL–Invert</text>');
   }
 
   // ── Block boundary line — drawn whenever Q8 offset is provided ──────────────
@@ -834,8 +859,10 @@ function buildCrossSectionSVG(compact) {
     const bdMidX = (cx + xB) / 2;
     // White background pill for legibility
     const labelW = compact ? 36 : 46;
-    o('<rect x="' + (bdMidX - labelW/2) + '" y="' + (bdDimY - fs - 2) + '" width="' + labelW + '" height="' + (fs + 4) + '" fill="white" rx="3" opacity="0.9"/>');
-    o('<text x="' + bdMidX + '" y="' + (bdDimY - 4) + '" text-anchor="middle" font-size="' + fs + '" font-weight="bold" fill="#7c3aed">' + offsetM + 'm</text>');
+    const labelW2 = compact ? 54 : 68;
+    o('<rect x="' + (bdMidX - labelW2/2) + '" y="' + (bdDimY - fs - 14) + '" width="' + labelW2 + '" height="' + (fs + 16) + '" fill="white" rx="3" opacity="0.92"/>');
+    o('<text x="' + bdMidX + '" y="' + (bdDimY - fs - 2) + '" text-anchor="middle" font-size="' + (fs-1) + '" fill="#7c3aed" font-style="italic">approx.</text>');
+    o('<text x="' + bdMidX + '" y="' + (bdDimY - 3) + '" text-anchor="middle" font-size="' + fs + '" font-weight="bold" fill="#7c3aed">' + offsetM + 'm</text>');
 
     // Vertical witness line from pipe centre down to dim line
     o('<line x1="' + cx + '" y1="' + yPipeC + '" x2="' + cx + '" y2="' + (bdDimY + 2) + '" stroke="#7c3aed" stroke-width="0.8" stroke-dasharray="3,2" opacity="0.5"/>');
@@ -859,6 +886,15 @@ function buildCrossSectionSVG(compact) {
       o('<text x="' + (lx+15) + '" y="' + legY + '" font-size="9" fill="#4b5563">' + it.label + '</text>');
       lx += 130;
     });
+  }
+
+  // ── Disclaimer (full only) ──────────────────────────────────────────────────
+  if (!compact) {
+    const disY = H - mB + 34;
+    const disclaimer = 'DISCLAIMER: Pipe depth, alignment and all dimensions shown are approximate only. The proponent, builder or developer is responsible for verifying';
+    const disclaimer2 = 'all parameters on site via a physical survey prior to commencing any construction works. Do not rely solely on this diagram for design purposes.';
+    o('<text x="' + mL + '" y="' + disY + '" font-size="7.5" fill="#9ca3af" font-style="italic">' + disclaimer + '</text>');
+    o('<text x="' + mL + '" y="' + (disY + 11) + '" font-size="7.5" fill="#9ca3af" font-style="italic">' + disclaimer2 + '</text>');
   }
 
   o('</svg>');
@@ -965,7 +1001,7 @@ function renderQ() {
   const nb = document.createElement('button');
   nb.className = 'next-btn';
   nb.style.marginTop = '0';
-  nb.textContent = cur < QS.length - 1 ? 'Next question →' : 'Build my Copilot prompt ❆';
+  nb.textContent = cur < QS.length - 1 ? 'Next question →' : 'Submit & log record ❖';
   nb.disabled = true;
   nb.onclick = () => {
     if (!pending) return;
@@ -1228,61 +1264,122 @@ function renderQ() {
   main.appendChild(grid);
 }
 
+function buildSummary() {
+  const a = answers;
+  const subject  = [a[0], a[2], a[1]].filter(Boolean).join(' ');
+  const sewerYes = a[3] === 'Yes';
+  const ap  = getAccessPassage();
+  const ep  = getEmergencyPassage();
+  const ppe = getPipeProtection();
+  const lines = [];
+  lines.push('CMP ASSESSMENT RECORD');
+  lines.push('=====================');
+  lines.push('Date/Time : ' + new Date().toLocaleString());
+  lines.push('');
+  lines.push('REFERENCE');
+  lines.push('  CMP Ref         : ' + (a[0] || '—'));
+  lines.push('  CMP ID          : ' + (a[1] || '—'));
+  lines.push('  Comm Type       : ' + (a[2] || '—'));
+  lines.push('  Subject Line    : ' + subject);
+  lines.push('');
+  lines.push('SEWER INFRASTRUCTURE');
+  lines.push('  Infra present   : ' + (a[3] || '—'));
+  if (sewerYes) {
+    lines.push('  Manhole present : ' + (a[4] || '—'));
+    lines.push('  Pipe diameter   : ' + (a[5] || '—') + ' mm');
+    lines.push('  Pipe depth      : ' + (a[6] || '—') + ' m');
+    lines.push('  Boundary offset : ' + (a[7] || '—') + ' m');
+    lines.push('  Boundary loc.   : ' + (a[8] || '—'));
+    lines.push('');
+    lines.push('AUTO-CALCULATED');
+    if (ap)  lines.push('  Access Passage            : ' + ap);
+    if (ep)  lines.push('  Emergency Access Passage  : ' + ep);
+    if (ppe) lines.push('  Pipe Protection Envelope  : ' + ppe);
+  }
+  return lines.join('\n');
+}
+
 function buildPrompt() {
   const a = answers;
-  // Q indices: 0=cmpRef, 1=cmpId, 2=commType,
-  //   3=sewerInfra, 4=sewerManhole, 5=pipeDiameter, 6=pipeDepth,
-  //   7=boundaryOffset, 8=boundaryLocation, 9=recipient, 10=isReply,
-  //   11=keyMessage, 12=deadline, 13=formal, 14=needsAction, 15=outcome, 16=attachment, 17=signoff
-  const subject       = [a[0], a[2], a[1]].filter(Boolean).join(' ');
-  const tone          = a[13] === 'Yes' ? 'formal and professional' : 'friendly and conversational';
-  const isReply       = a[10] === 'Yes';
-  const hasDeadline   = a[12] !== '0' && a[12] !== '';
-  const hasAttachment = a[16] === 'Yes';
-  const needsAction   = a[14] === 'Yes';
-  const accessPassage = getAccessPassage();
+  const subject  = [a[0], a[2], a[1]].filter(Boolean).join(' ');
+  const sewerYes = a[3] === 'Yes';
+  const ap  = getAccessPassage();
+  const ep  = getEmergencyPassage();
+  const ppe = getPipeProtection();
 
-  const sewerYes     = a[3] === 'Yes';
-  const emergencyPassage = getEmergencyPassage();
-
-  let p = 'Write a ' + tone + ' email with the following details:\n\n';
-  p += 'RECIPIENT: ' + a[9] + '\n';
+  let p = 'Write a formal professional email regarding a CMP (Construction Management Plan) sewer assessment with the following details:\n\n';
   p += 'SUBJECT: ' + subject + '\n';
-  p += 'COMMUNICATION TYPE: ' + a[2] + '\n\n';
+  p += 'COMMUNICATION TYPE: ' + (a[2] || '') + '\n\n';
   p += '--- SITE / INFRASTRUCTURE DETAILS ---\n';
-  p += 'Sewer infrastructure within subject block: ' + a[3] + '\n';
+  p += 'CMP Reference: ' + (a[0] || '') + '\n';
+  p += 'CMP ID: ' + (a[1] || '') + '\n';
+  p += 'Sewer infrastructure within subject block: ' + (a[3] || '') + '\n';
   if (sewerYes) {
-    p += 'Sewer manhole within subject block: ' + a[4] + '\n';
-    p += 'Pipe diameter: ' + a[5] + 'mm\n';
-    p += 'Approx. pipe depth: ' + a[6] + 'm\n';
-    p += 'Sewer boundary offset: ' + a[7] + 'm\n';
-    p += 'Asset boundary location: ' + a[8] + '\n';
-    if (accessPassage)    p += 'Access Passage required: ' + accessPassage + '\n';
-    if (emergencyPassage) p += 'Emergency Access Passage required: ' + emergencyPassage + '\n';
-    const pipeProtection = getPipeProtection();
-    if (pipeProtection)   p += 'Pipe Protection Envelope: ' + pipeProtection + '\n';
+    p += 'Sewer manhole within subject block: ' + (a[4] || '') + '\n';
+    p += 'Pipe diameter: ' + (a[5] || '') + 'mm\n';
+    p += 'Approx. pipe depth: ' + (a[6] || '') + 'm\n';
+    p += 'Sewer boundary offset: ' + (a[7] || '') + 'm\n';
+    p += 'Asset boundary location: ' + (a[8] || '') + '\n';
+    if (ap)  p += 'Access Passage required: ' + ap + '\n';
+    if (ep)  p += 'Emergency Access Passage: ' + ep + '\n';
+    if (ppe) p += 'Pipe Protection Envelope: ' + ppe + '\n';
   }
-  p += '\n--- EMAIL DETAILS ---\n';
-  p += isReply ? 'This is a reply to an email I received.\n\n' : 'This is a new email I am initiating.\n\n';
-  p += 'KEY MESSAGE:\n' + a[11] + '\n\n';
-  if (needsAction) p += 'ACTION REQUIRED: The recipient needs to take action. Desired outcome: ' + a[15] + '\n';
-  if (hasDeadline) p += 'DEADLINE: Please include a polite note that a response is needed within ' + a[12] + ' day' + (a[12]==='1'?'':'s') + '.\n';
-  if (hasAttachment) p += 'ATTACHMENT: Mention that a supporting document is included for their reference.\n';
-  p += '\nSIGN-OFF:\n' + a[17] + '\n\n';
-  p += 'Please write the full email — greeting, body paragraphs, and closing. Make it clear, concise, and ready to send without any editing needed.';
+  p += '\nPlease draft a professional assessment notification email covering the above infrastructure details, any access or protection requirements identified, and request the recipient review and respond accordingly. Make it clear, concise and ready to send.';
   return p.trim();
+}
+
+// ── Record log (localStorage) ────────────────────────────────────────────────
+function saveRecord() {
+  try {
+    const existing = JSON.parse(localStorage.getItem('cmp_records') || '[]');
+    const rec = {
+      id: Date.now(),
+      date: new Date().toISOString(),
+      cmpRef: answers[0] || '',
+      cmpId:  answers[1] || '',
+      commType: answers[2] || '',
+      sewerInfra: answers[3] || '',
+      manhole: answers[4] || '',
+      pipeDiam: answers[5] || '',
+      pipeDepth: answers[6] || '',
+      offset: answers[7] || '',
+      boundaryLoc: answers[8] || '',
+      accessPassage: getAccessPassage() || '',
+      emergencyPassage: getEmergencyPassage() || '',
+      ppe: getPipeProtection() || '',
+      summary: buildSummary()
+    };
+    existing.push(rec);
+    localStorage.setItem('cmp_records', JSON.stringify(existing));
+    return true;
+  } catch(e) { return false; }
+}
+
+function getRecords() {
+  try { return JSON.parse(localStorage.getItem('cmp_records') || '[]'); }
+  catch(e) { return []; }
 }
 
 function renderResult() {
   const prompt = buildPrompt();
+  const summary = buildSummary();
+
+  // Auto-save record on reaching result screen
+  const saved = saveRecord();
+
+  // Build mailto link for Icon Water team inbox
+  const subjectLine = [answers[0], answers[2], answers[1]].filter(Boolean).join(' ');
+  const mailtoUrl = 'mailto:basubmission_watersewer@iconwater.com.au'
+    + '?subject=' + encodeURIComponent('CMP Assessment: ' + subjectLine)
+    + '&body=' + encodeURIComponent(summary + '\n\n---\nCopilot Prompt:\n' + prompt);
 
   const sec = document.createElement('div');
   sec.className = 'result-section';
 
   sec.innerHTML = `
     <div class="result-header">
-      <h2>Your prompt is ready.</h2>
-      <p>Copy it and paste directly into Microsoft Copilot to generate your email.</p>
+      <h2>Assessment complete.</h2>
+      <p>Record saved locally. Copy the Copilot prompt or send the assessment summary by email.</p>
       <div style="margin-top:16px;display:inline-flex;align-items:center;gap:10px;background:var(--accent-light);border:1px solid var(--accent);border-radius:10px;padding:10px 16px;flex-wrap:wrap;">
         <span style="font-size:11px;text-transform:uppercase;letter-spacing:0.1em;color:var(--accent);font-weight:500;">Subject</span>
         <span style="font-size:14px;font-weight:500;color:var(--accent);">${answers[0]||''}</span>
@@ -1344,34 +1441,112 @@ function renderResult() {
   pb.textContent = prompt;
   left.appendChild(pb);
 
-  // RIGHT — steps + buttons
+  // RIGHT — actions panel
   const right = document.createElement('div');
 
-  const stepsCard = document.createElement('div');
-  stepsCard.className = 'steps-card';
-  stepsCard.innerHTML = `
-    <div class="steps-title">How to use this</div>
-    <div class="step-row"><div class="step-num">1</div><div class="step-text">Click <strong>Copy prompt</strong> below</div></div>
-    <div class="step-row"><div class="step-num">2</div><div class="step-text">Open <strong>Microsoft Copilot</strong> in Outlook, Teams, or at copilot.microsoft.com</div></div>
-    <div class="step-row"><div class="step-num">3</div><div class="step-text">Paste and hit send — Copilot drafts your email instantly</div></div>
-    <div class="step-row"><div class="step-num">4</div><div class="step-text">Use <strong>"Make it shorter"</strong> or <strong>"Adjust the tone"</strong> to refine</div></div>`;
-  right.appendChild(stepsCard);
+  // ── Send email card ────────────────────────────────────────────────────────
+  const emailCard = document.createElement('div');
+  emailCard.className = 'steps-card';
+  emailCard.innerHTML =
+    '<div class="steps-title">Send assessment</div>' +
+    '<p style="font-size:12px;color:var(--muted);margin-bottom:14px;line-height:1.6;">Opens your email client with the assessment summary and Copilot prompt pre-filled, addressed to the <strong>Icon Water team inbox</strong>.</p>';
 
+  const emailBtn = document.createElement('a');
+  emailBtn.href = mailtoUrl;
+  emailBtn.style.cssText = 'display:block;width:100%;padding:13px;background:var(--accent);color:#fff;border:none;border-radius:10px;font-family:inherit;font-size:12px;font-weight:500;letter-spacing:0.06em;text-transform:uppercase;cursor:pointer;text-align:center;text-decoration:none;box-sizing:border-box;transition:opacity 0.15s;margin-bottom:8px;';
+  emailBtn.textContent = '✉ Send to Team Inbox (Icon Water)';
+  emailBtn.onmouseenter = () => emailBtn.style.opacity = '0.85';
+  emailBtn.onmouseleave = () => emailBtn.style.opacity = '1';
+  emailCard.appendChild(emailBtn);
+  right.appendChild(emailCard);
+
+  // ── Copilot prompt copy ────────────────────────────────────────────────────
   const cb = document.createElement('button');
   cb.className = 'copy-btn';
-  cb.textContent = 'Copy prompt to clipboard';
+  cb.style.marginTop = '10px';
+  cb.textContent = 'Copy Copilot prompt';
   cb.onclick = () => {
     navigator.clipboard.writeText(prompt).then(() => {
       cb.textContent = '✓ Copied — paste into Copilot!';
       cb.classList.add('copied');
-      setTimeout(() => { cb.textContent = 'Copy prompt to clipboard'; cb.classList.remove('copied'); }, 3000);
+      setTimeout(() => { cb.textContent = 'Copy Copilot prompt'; cb.classList.remove('copied'); }, 3000);
     });
   };
   right.appendChild(cb);
 
+  // ── Log / records ──────────────────────────────────────────────────────────
+  const logCard = document.createElement('div');
+  logCard.className = 'steps-card';
+  logCard.style.marginTop = '14px';
+
+  const records = getRecords();
+  const logTitle = document.createElement('div');
+  logTitle.className = 'steps-title';
+  logTitle.textContent = 'Assessment log (' + records.length + ' records)';
+  logCard.appendChild(logTitle);
+
+  if (records.length === 0) {
+    const noRec = document.createElement('p');
+    noRec.style.cssText = 'font-size:12px;color:var(--muted);';
+    noRec.textContent = 'No records yet.';
+    logCard.appendChild(noRec);
+  } else {
+    // Show last 5 records, newest first
+    const recent = [...records].reverse().slice(0, 5);
+    recent.forEach(rec => {
+      const row = document.createElement('div');
+      row.style.cssText = 'padding:8px 0;border-bottom:0.5px solid var(--border);font-size:11px;';
+      const dt = new Date(rec.date).toLocaleString('en-AU', {day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});
+      row.innerHTML =
+        '<div style="font-weight:500;color:var(--text);">' + (rec.cmpRef || '—') + ' ' + (rec.commType || '') + ' ' + (rec.cmpId || '') + '</div>' +
+        '<div style="color:var(--muted);margin-top:2px;">' + dt + ' &nbsp;·&nbsp; Depth: ' + (rec.pipeDepth || '—') + 'm &nbsp;·&nbsp; PPE: ' + (rec.ppe || '—') + '</div>';
+      logCard.appendChild(row);
+    });
+    if (records.length > 5) {
+      const more = document.createElement('p');
+      more.style.cssText = 'font-size:11px;color:var(--muted);margin-top:6px;';
+      more.textContent = '+ ' + (records.length - 5) + ' older records stored locally.';
+      logCard.appendChild(more);
+    }
+  }
+
+  // Export all records as CSV
+  const exportBtn = document.createElement('button');
+  exportBtn.className = 'restart-btn';
+  exportBtn.style.marginTop = '10px';
+  exportBtn.textContent = '⇩ Export all records as CSV';
+  exportBtn.onclick = () => {
+    const recs = getRecords();
+    if (!recs.length) return;
+    const cols = ['date','cmpRef','cmpId','commType','sewerInfra','manhole','pipeDiam','pipeDepth','offset','boundaryLoc','accessPassage','emergencyPassage','ppe'];
+    const csvRows = [cols.join(',')];
+    recs.forEach(r => csvRows.push(cols.map(c => '"' + (r[c]||'').replace(/"/g,'""') + '"').join(',')));
+    const blob = new Blob([csvRows.join('\n')], {type:'text/csv'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'cmp-assessment-records.csv';
+    a.click();
+  };
+  logCard.appendChild(exportBtn);
+
+  // Clear records button
+  const clearBtn = document.createElement('button');
+  clearBtn.className = 'restart-btn';
+  clearBtn.style.marginTop = '6px';
+  clearBtn.textContent = '✕ Clear all records';
+  clearBtn.onclick = () => {
+    if (confirm('Clear all saved records? This cannot be undone.')) {
+      localStorage.removeItem('cmp_records');
+      renderResult();
+    }
+  };
+  logCard.appendChild(clearBtn);
+  right.appendChild(logCard);
+
   const rb = document.createElement('button');
   rb.className = 'restart-btn';
-  rb.textContent = '↺ Start over';
+  rb.style.marginTop = '10px';
+  rb.textContent = '↺ New assessment';
   rb.onclick = () => { cur = 0; answers = []; render(); };
   right.appendChild(rb);
 
