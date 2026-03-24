@@ -619,10 +619,10 @@ function buildCrossSectionSVG(compact) {
   const worldH  = aboveGL + belowGL;
 
   // SVG canvas — compact mode for sidebar, full mode for result screen
-  const W  = compact ? 340 : 700;
+  const W  = compact ? 340 : 720;
   const H  = compact ? 360 : 500;
   const mL = compact ? 54 : 110;
-  const mR = compact ? 44 : 88;
+  const mR = compact ? 44 : 105;
   const mT = compact ? 36 : 44;
   const mB = compact ? 28 : 44;
   const dW = W - mL - mR;
@@ -701,6 +701,18 @@ function buildCrossSectionSVG(compact) {
   o('<rect x="' + ppeL + '" y="' + mT + '" width="' + (ppeR2 - ppeL) + '" height="' + (yGL - mT) + '" fill="' + C.ppeHighlight + '"/>');
   // PPE hatch — sky portion
   o('<rect x="' + ppeL + '" y="' + mT + '" width="' + (ppeR2 - ppeL) + '" height="' + (yGL - mT) + '" fill="url(#' + hId + ')" opacity="0.6"/>');
+
+  // "No permanent structure permissible" note — centred in sky PPE zone
+  if (!compact) {
+    const npsY = mT + (yGL - mT) / 2;
+    const npsX = cx;
+    // Rotated text group — SVG transform for vertical text
+    o('<text x="' + npsX + '" y="' + (npsY + 40) + '" text-anchor="middle" font-size="9" font-weight="bold" fill="' + C.ppeStroke + '" transform="rotate(-90 ' + npsX + ' ' + npsY + ')" opacity="0.85">No permanent structure permissible</text>');
+  } else {
+    // Compact: short horizontal note at top of sky PPE area
+    o('<text x="' + cx + '" y="' + (mT + 11) + '" text-anchor="middle" font-size="7" font-weight="bold" fill="' + C.ppeStroke + '" opacity="0.8">No permanent</text>');
+    o('<text x="' + cx + '" y="' + (mT + 20) + '" text-anchor="middle" font-size="7" font-weight="bold" fill="' + C.ppeStroke + '" opacity="0.8">structure permissible</text>');
+  }
 
   // ── Soil zone ────────────────────────────────────────────────────────────
   o('<rect x="' + mL + '" y="' + yGL + '" width="' + dW + '" height="' + (H - mB - yGL) + '" fill="url(#sp' + (compact?'c':'f') + ')"/>');
@@ -781,36 +793,52 @@ function buildCrossSectionSVG(compact) {
     o('<text x="' + pilAx + '" y="' + (yInv - 24) + '" text-anchor="middle" font-size="9" fill="' + C.pilLine + '">Pipe Invert</text>');
   }
 
-  // ── Depth annotation (right side, NGL to Pipe Invert) ────────────────────
-  const depX  = mL + dW + (compact ? 24 : 46);
+  // ── Depth annotation — vertical witness line inside right margin ────────────
+  // Compact: use a tight right offset; Full: sit within mR so text is never cropped
+  const depX   = compact ? (mL + dW + 18) : (mL + dW + 22);
   const depMid = yGL + (yInv - yGL) / 2;
+  // Witness lines from diagram edge to dimension line
+  o('<line x1="' + (mL+dW) + '" y1="' + yGL + '" x2="' + (depX+2) + '" y2="' + yGL + '" stroke="' + C.dim + '" stroke-width="0.7" stroke-dasharray="3,2" opacity="0.5"/>');
+  o('<line x1="' + (mL+dW) + '" y1="' + yInv + '" x2="' + (depX+2) + '" y2="' + yInv + '" stroke="' + C.dim + '" stroke-width="0.7" stroke-dasharray="3,2" opacity="0.5"/>');
+  // Main dimension line
   o('<line x1="' + depX + '" y1="' + yGL + '" x2="' + depX + '" y2="' + yInv + '" stroke="' + C.dim + '" stroke-width="1.6"/>');
   o('<line x1="' + (depX-4) + '" y1="' + yGL + '" x2="' + (depX+4) + '" y2="' + yGL + '" stroke="' + C.dim + '" stroke-width="1.6"/>');
   o('<line x1="' + (depX-4) + '" y1="' + yInv + '" x2="' + (depX+4) + '" y2="' + yInv + '" stroke="' + C.dim + '" stroke-width="1.6"/>');
+  // Label — centred on the dimension line
   o('<text x="' + (depX + 5) + '" y="' + (depMid - 5) + '" font-size="' + fs + '" font-weight="bold" fill="' + C.dim + '">' + depth.toFixed(2) + 'm</text>');
   if (!compact) {
     o('<text x="' + (depX + 5) + '" y="' + (depMid + 8) + '" font-size="8" fill="' + C.dim + '">NGL–Invert</text>');
   }
 
-  // ── Block boundary line (only when offset answer provided) ──────────────────
-  if (offsetM > 0 && xBound >= mL && xBound <= mL + dW) {
-    // Vertical boundary line — full height of diagram
-    o('<line x1="' + xBound + '" y1="' + mT + '" x2="' + xBound + '" y2="' + (H - mB) + '" stroke="#7c3aed" stroke-width="' + (compact?1.6:2) + '" stroke-dasharray="8,4"/>');
+  // ── Block boundary line — drawn whenever Q8 offset is provided ──────────────
+  if (offsetM > 0) {
+    // Clamp xBound within drawing area for rendering, but always dimension from cx
+    const xB = Math.min(Math.max(xBound, mL + 4), mL + dW - 4);
 
-    // Label at top
-    o('<text x="' + xBound + '" y="' + (mT - 4) + '" text-anchor="middle" font-size="' + (fs-1) + '" font-weight="bold" fill="#7c3aed">Block Boundary</text>');
+    // Vertical dashed boundary line — full diagram height
+    o('<line x1="' + xB + '" y1="' + mT + '" x2="' + xB + '" y2="' + (H - mB) + '" stroke="#7c3aed" stroke-width="' + (compact?1.8:2.2) + '" stroke-dasharray="8,4"/>');
 
-    // Annotation below ground level
-    const bbLabelY = yGL + 14;
-    o('<text x="' + (xBound + 4) + '" y="' + bbLabelY + '" font-size="' + (fs-1) + '" fill="#7c3aed">' + offsetM + 'm offset</text>');
+    // "Block Boundary" label at top of line
+    o('<text x="' + xB + '" y="' + (mT - 6) + '" text-anchor="middle" font-size="' + (fs) + '" font-weight="bold" fill="#7c3aed">Block Boundary</text>');
 
-    // Dimension: pipe centre to boundary (horizontal, below pipe invert level)
-    const bdDimY = yInv + (compact ? 18 : 26);
-    o('<line x1="' + cx + '" y1="' + bdDimY + '" x2="' + xBound + '" y2="' + bdDimY + '" stroke="#7c3aed" stroke-width="1.4"/>');
-    o('<line x1="' + cx + '" y1="' + (bdDimY-4) + '" x2="' + cx + '" y2="' + (bdDimY+4) + '" stroke="#7c3aed" stroke-width="1.4"/>');
-    o('<line x1="' + xBound + '" y1="' + (bdDimY-4) + '" x2="' + xBound + '" y2="' + (bdDimY+4) + '" stroke="#7c3aed" stroke-width="1.4"/>');
-    o('<text x="' + ((cx+xBound)/2) + '" y="' + (bdDimY + fs + 1) + '" text-anchor="middle" font-size="' + (fs-1) + '" fill="#7c3aed">' + offsetM + 'm</text>');
+    // Dimension: pipe centre → boundary, drawn below Pipe Invert level
+    const bdDimY = yInv + (compact ? 16 : 24);
+    // Horizontal dim line with ticks
+    o('<line x1="' + cx + '" y1="' + bdDimY + '" x2="' + xB + '" y2="' + bdDimY + '" stroke="#7c3aed" stroke-width="1.5"/>');
+    o('<line x1="' + cx + '" y1="' + (bdDimY-5) + '" x2="' + cx + '" y2="' + (bdDimY+5) + '" stroke="#7c3aed" stroke-width="1.5"/>');
+    o('<line x1="' + xB + '" y1="' + (bdDimY-5) + '" x2="' + xB + '" y2="' + (bdDimY+5) + '" stroke="#7c3aed" stroke-width="1.5"/>');
+    // Arrowheads
+    o('<polygon points="' + cx + ',' + bdDimY + ' ' + (cx+7) + ',' + (bdDimY-3) + ' ' + (cx+7) + ',' + (bdDimY+3) + '" fill="#7c3aed"/>');
+    o('<polygon points="' + xB + ',' + bdDimY + ' ' + (xB-7) + ',' + (bdDimY-3) + ' ' + (xB-7) + ',' + (bdDimY+3) + '" fill="#7c3aed"/>');
+    // Distance label centred on dimension line
+    const bdMidX = (cx + xB) / 2;
+    // White background pill for legibility
+    const labelW = compact ? 36 : 46;
+    o('<rect x="' + (bdMidX - labelW/2) + '" y="' + (bdDimY - fs - 2) + '" width="' + labelW + '" height="' + (fs + 4) + '" fill="white" rx="3" opacity="0.9"/>');
+    o('<text x="' + bdMidX + '" y="' + (bdDimY - 4) + '" text-anchor="middle" font-size="' + fs + '" font-weight="bold" fill="#7c3aed">' + offsetM + 'm</text>');
 
+    // Vertical witness line from pipe centre down to dim line
+    o('<line x1="' + cx + '" y1="' + yPipeC + '" x2="' + cx + '" y2="' + (bdDimY + 2) + '" stroke="#7c3aed" stroke-width="0.8" stroke-dasharray="3,2" opacity="0.5"/>');
   }
 
   // ── Diagram border ────────────────────────────────────────────────────────
