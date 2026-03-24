@@ -483,18 +483,88 @@
 const QS = [
   {id:1,  type:"text",   text:"Please input CMP application reference number.",           hint:"This will form part of the email subject line"},
   {id:2,  type:"text",   text:"Please input CMP ID ref.",                                  hint:"This will complete the email subject line"},
-  {id:3,  type:"choice", text:"Please select the communication type.",                     hint:"This will appear between the two references in the subject line", options:["Internal Communication","External Communication"]},
+  {id:3,  type:"choice", text:"Please select the communication type.",                     hint:"This will appear between the two references in the subject line", options:["Internal Communication","External Communication"], defaultVal:"External Communication"},
   {id:4,  type:"yesno",  text:"Is there a sewer infrastructure within the subject block?", hint:"", defaultVal:"Yes"},
   {id:5,  type:"yesno",  text:"Is there a sewer manhole within the subject block?",        hint:"Shown only when Q4 is Yes", defaultVal:"No"},
   {id:6,  type:"number", text:"Enter pipe diameter (mm).",                                  hint:"Numbers only", defaultVal:"150"},
   {id:7,  type:"number", text:"Enter approx. pipe depth in meters.",                       hint:"e.g. 1.5 — Access Passage will be calculated automatically"},
   {id:8,  type:"number", text:"What is the approx. sewer boundary offset? (m)",            hint:"Distance in metres from pipe centre to block boundary"},
-  {id:9,  type:"choice", text:"Which boundary is the asset located?",                      hint:"Select one", options:["Front","Rear","North","West","East","South"], defaultVal:"Rear"},
+  {id:9,  type:"compass", text:"Which boundary is the asset located?",                      hint:"Select one", options:["Front","Rear","North","West","East","South"], defaultVal:"Rear"},
+  {id:10, type:"yesno",  text:"Is the PPE entirely clear of all structures?",              hint:"Are there no proposed or existing structures within the Pipe Protection Envelope?", defaultVal:"No"},
+  {id:11, type:"yesno",  text:"Are there any structures within the Zone of Influence?",    hint:"ZOI extends at 45 degrees from pipe invert to NGL on both sides", defaultVal:"No"},
+  {id:12, type:"yesno",  text:"Are the minimum access passage widths provided?",          hint:"Refer to calculated Access Passage and Emergency Access Passage values", defaultVal:"Yes"},
 ];
 
 // Sewer infra answer is at index 3 (Q4). If No, Q5-Q9 are skipped.
 // When Q4 is No, answers[4..8] are stored as 'N/A' so indices stay consistent.
 function sewerIsYes() { return answers[3] === 'Yes'; }
+
+// Assessment text based on Q10 (PPE clear, index 9) and Q11 (structures in ZOI, index 10)
+function getAssessmentText() {
+  if (!sewerIsYes()) return null;
+  const ppeClear     = answers[9];
+  const structInZOI  = answers[10];
+  if (!ppeClear || !structInZOI || ppeClear === 'N/A') return null;
+
+  const offset    = parseFloat(answers[7]) || 0;
+  const pipeDepth = parseFloat(answers[6]) || 0;
+  const ppeM      = (() => {
+    const p = getPipeProtection() || '2.5m wide';
+    if (p.startsWith('Seek')) return 4.0;
+    if (p === '3.5m wide') return 3.5;
+    return 2.5;
+  })();
+
+  const distPPE = (offset + ppeM / 2).toFixed(1);
+  const distZOI = (offset + pipeDepth).toFixed(1);
+  const boundary = answers[8] || 'subject';
+
+  const shallowPipe = pipeDepth < ppeM / 2;
+
+  if (ppeClear === 'No' && structInZOI === 'Yes') {
+    let txt = 'Design & siting is NOT acceptable. All proposed structures must be moved outside the Pipe Protection Envelope (approx. ' + distPPE + 'm from the ' + boundary + ' boundary).';
+    if (!shallowPipe) {
+      txt += ' A structural design solution for all proposed structures within the Zone of Influence (approx. ' + distZOI + 'm from the ' + boundary + ' boundary) must be provided, ' +
+        'including a site-specific detailed section and certification from a licensed structural engineer confirming stability of the ' +
+        'structure and foundations in the event of a full depth excavation of the Pipe Protection Envelope.';
+    }
+    return txt;
+  }
+  if (ppeClear === 'No' && structInZOI === 'No') {
+    let txtNN = 'Design & siting is NOT acceptable. All proposed structures must be moved outside the Pipe Protection Envelope (approx. ' + distPPE + 'm from the ' + boundary + ' boundary).';
+    if (!shallowPipe) {
+      txtNN += ' No structures are indicated within the Zone of Influence however the PPE must remain clear at all times.';
+    }
+    return txtNN;
+  }
+  if (ppeClear === 'Yes' && structInZOI === 'Yes') {
+    let txt2 = 'Design & siting is acceptable however structures are within the Zone of Influence of the existing sewer main.';
+    if (!shallowPipe) {
+      txt2 += ' A structural design solution must be provided for all proposed structures within the Zone of Influence (approx. ' + distZOI + 'm from the ' + boundary + ' boundary), ' +
+        'including a site-specific detailed section and certification from a licensed structural engineer confirming stability ' +
+        'of the structure and foundations in the event of a full depth excavation of the Pipe Protection Envelope.';
+    }
+    return txt2;
+  }
+  if (ppeClear === 'Yes' && structInZOI === 'No') {
+    return 'Design & siting is acceptable. The Pipe Protection Envelope (approx. ' + distPPE + 'm from the ' + boundary + ' boundary) and Zone of Influence are clear of all proposed structures. ' +
+      'Standard conditions apply. Confirm asset location on site prior to construction.';
+  }
+  return null;
+}
+
+// Min access passage note — if Q12 (index 11) is No
+function getMinPassageNote() {
+  if (!sewerIsYes()) return null;
+  if (answers[11] !== 'No') return null;
+  const ap  = getAccessPassage();
+  const ep  = getEmergencyPassage();
+  let note = 'Minimum access passage widths are not provided. ';
+  if (ap)  note += 'Access Passage must be a minimum of ' + ap + '. ';
+  if (ep)  note += 'Emergency Access Passage must be a minimum of ' + ep + ' and must be maintained as a 24/7 emergency access passage at all times. ';
+  note += 'These must be provided in accordance with the minimum Icon Water passage requirements and clearly detailed on the site plans prior to acceptance.';
+  return note.trim();
+}
 
 // Access Passage from pipe depth (index 7)
 function getAccessPassage() {
@@ -719,40 +789,38 @@ function buildCrossSectionSVG(compact) {
   // 45° angle label at pipe invert corner
   o('<text x="' + (cx - pipeR - 5) + '" y="' + (yInv - 5) + '" text-anchor="end" font-size="' + (fs-1) + '" fill="' + C.zoiStroke + '">45°</text>');
 
-  // ── ZOI label: outside PPE to the LEFT with leader arrow ──────────────────
-  // Anchor point: midpoint of left ZOI boundary line
-  const zoiAnchorX = (cx - pipeR + zoiLx) / 2;
-  const zoiAnchorY = (yInv + yGL) / 2;
-  // Label sits left of left PPE edge, in the free soil zone
-  const zoiLabelX = compact ? Math.max(mL + 6, ppeL - 36) : Math.max(mL + 6, ppeL - 60);
+  // ── ZOI label: LEFT — anchor in the OFFSET zone between zoiLx and ppeL ──────
+  // Use a point 30% from zoiLx toward ppeL — clearly in the exposed ZOI strip
+  const zoiAnchorX = zoiLx + (ppeL - zoiLx) * 0.35;
+  const zoiAnchorY = yGL + (yInv - yGL) * 0.45;   // slightly above mid-height
+  // Label: left-aligned, left of anchor with breathing room
+  const zoiLabelX = Math.max(mL + 4, zoiLx - 2);
   const zoiLabelY = zoiAnchorY;
-  // Leader line from label to anchor point on ZOI line
-  o('<line x1="' + (zoiLabelX + (compact?30:52)) + '" y1="' + zoiLabelY + '" x2="' + (zoiAnchorX + 4) + '" y2="' + zoiAnchorY + '" stroke="' + C.zoiStroke + '" stroke-width="1" stroke-dasharray="3,2"/>');
-  // Arrowhead at anchor
-  o('<polygon points="' + zoiAnchorX + ',' + zoiAnchorY + ' ' + (zoiAnchorX+8) + ',' + (zoiAnchorY-3) + ' ' + (zoiAnchorX+8) + ',' + (zoiAnchorY+3) + '" fill="' + C.zoiStroke + '"/>');
-  // Label text
-  o('<text x="' + zoiLabelX + '" y="' + (zoiLabelY - 5) + '" text-anchor="start" font-size="' + (fs-1) + '" fill="' + C.zoiStroke + '" font-weight="bold">Zone of</text>');
+  // Leader line: from right edge of label block to anchor
+  const zoiLeaderX1 = zoiLabelX + (compact ? 28 : 48);
+  o('<line x1="' + zoiLeaderX1 + '" y1="' + zoiLabelY + '" x2="' + (zoiAnchorX - 2) + '" y2="' + zoiAnchorY + '" stroke="' + C.zoiStroke + '" stroke-width="1.2" stroke-dasharray="4,2"/>');
+  // Filled arrowhead pointing right toward anchor
+  o('<polygon points="' + zoiAnchorX + ',' + zoiAnchorY + ' ' + (zoiAnchorX-7) + ',' + (zoiAnchorY-3.5) + ' ' + (zoiAnchorX-7) + ',' + (zoiAnchorY+3.5) + '" fill="' + C.zoiStroke + '"/>');
+  // Label
+  o('<text x="' + zoiLabelX + '" y="' + (zoiLabelY - 6) + '" text-anchor="start" font-size="' + (fs-1) + '" fill="' + C.zoiStroke + '" font-weight="bold">Zone of</text>');
   o('<text x="' + zoiLabelX + '" y="' + (zoiLabelY + fs) + '" text-anchor="start" font-size="' + (fs-1) + '" fill="' + C.zoiStroke + '" font-weight="bold">Influence</text>');
 
-  // ── Struct. note: outside PPE to the RIGHT with leader arrow ──────────────
+  // ── Struct. note: RIGHT — anchor in the OFFSET zone between ppeR2 and zoiRx ─
   if (!compact) {
-    // Anchor: midpoint of right ZOI boundary line
-    const zoiRAnchorX = (cx + pipeR + zoiRx) / 2;
-    const zoiRAnchorY = (yInv + yGL) / 2;
-    // Label sits to the right of right PPE edge
-    const zoiRLabelX = ppeR2 + 8;
-    const zoiRLabelY = zoiRAnchorY;
-    // Leader line
-    o('<line x1="' + zoiRLabelX + '" y1="' + zoiRLabelY + '" x2="' + (zoiRAnchorX - 4) + '" y2="' + zoiRAnchorY + '" stroke="' + C.zoiStroke + '" stroke-width="1" stroke-dasharray="3,2"/>');
-    // Arrowhead
-    o('<polygon points="' + zoiRAnchorX + ',' + zoiRAnchorY + ' ' + (zoiRAnchorX-8) + ',' + (zoiRAnchorY-3) + ' ' + (zoiRAnchorX-8) + ',' + (zoiRAnchorY+3) + '" fill="' + C.zoiStroke + '"/>');
-    // Multi-line note
+    // Point 30% from zoiRx toward ppeR2 — in the exposed right ZOI strip
+    const zoiRAnchorX = zoiRx - (zoiRx - ppeR2) * 0.35;
+    const zoiRAnchorY = yGL + (yInv - yGL) * 0.45;
+    const zoiRLabelX  = Math.min(mL + dW - 4, zoiRx + 4);
+    // Leader from anchor to right label (right-aligned)
+    o('<line x1="' + (zoiRAnchorX + 2) + '" y1="' + zoiRAnchorY + '" x2="' + (zoiRLabelX - 2) + '" y2="' + zoiRAnchorY + '" stroke="' + C.zoiStroke + '" stroke-width="1.2" stroke-dasharray="4,2"/>');
+    // Arrowhead pointing left toward anchor
+    o('<polygon points="' + zoiRAnchorX + ',' + zoiRAnchorY + ' ' + (zoiRAnchorX+7) + ',' + (zoiRAnchorY-3.5) + ' ' + (zoiRAnchorX+7) + ',' + (zoiRAnchorY+3.5) + '" fill="' + C.zoiStroke + '"/>');
+    // Multi-line note right-aligned from zoiRLabelX
     const noteLines = ['Structural solution', 'and details / certification', 'from licensed structural', 'engineer required'];
     noteLines.forEach((line, idx) => {
-      o('<text x="' + zoiRLabelX + '" y="' + (zoiRLabelY - 20 + idx * 11) + '" text-anchor="start" font-size="8" fill="' + C.zoiStroke + '" font-style="italic">' + line + '</text>');
+      o('<text x="' + (zoiRLabelX - 2) + '" y="' + (zoiRAnchorY - 18 + idx * 11) + '" text-anchor="end" font-size="8" fill="' + C.zoiStroke + '" font-style="italic">' + line + '</text>');
     });
   } else {
-    // Compact: short note below ZOI label
     o('<text x="' + zoiLabelX + '" y="' + (zoiLabelY + fs*2 + 5) + '" text-anchor="start" font-size="7" fill="' + C.zoiStroke + '" font-style="italic">Struct. Eng.</text>');
     o('<text x="' + zoiLabelX + '" y="' + (zoiLabelY + fs*3 + 6) + '" text-anchor="start" font-size="7" fill="' + C.zoiStroke + '" font-style="italic">cert. required</text>');
   }
@@ -962,9 +1030,459 @@ function copyDiagramToClipboard(wrapperId) {
   });
 }
 
+function loadRecordIntoCalculator(rec) {
+  // Restore answers array from saved record (indices 0-11)
+  // Map: 0=cmpRef,1=cmpId,2=commType,3=sewerInfra,4=manhole,5=pipeDiam,
+  //      6=pipeDepth,7=offset,8=boundaryLoc,9=ppeClear,10=structInZOI,11=minPassage
+  const sewerYes = rec.sewerInfra === 'Yes';
+  answers = [
+    rec.cmpRef      || '',
+    rec.cmpId       || '',
+    rec.commType    || '',
+    rec.sewerInfra  || 'Yes',
+    sewerYes ? (rec.manhole      || 'No')   : 'N/A',
+    sewerYes ? (rec.pipeDiam     || '150')  : 'N/A',
+    sewerYes ? (rec.pipeDepth    || '')     : 'N/A',
+    sewerYes ? (rec.offset       || '')     : 'N/A',
+    sewerYes ? (rec.boundaryLoc  || 'Rear') : 'N/A',
+    sewerYes ? (rec.ppeClear     || 'No')   : 'N/A',
+    sewerYes ? (rec.structInZOI  || 'No')   : 'N/A',
+    sewerYes ? (rec.minPassage   || 'Yes')  : 'N/A',
+  ];
+  liveRef = answers[0];
+  liveId  = answers[1];
+  cur = QS.length; // go straight to result screen, no new record saved
+  renderResultReadOnly();
+}
+
+function renderResultReadOnly() {
+  // Same as renderResult but does NOT call saveRecord()
+  const prompt = buildPrompt();
+  const summary = buildSummary();
+
+  const subjectLine = [answers[0], answers[2], answers[1]].filter(Boolean).join(' ');
+  const mailtoUrl = 'mailto:basubmission_watersewer@iconwater.com.au'
+    + '?subject=' + encodeURIComponent('CMP Assessment: ' + subjectLine)
+    + '&body=' + encodeURIComponent(summary + '\n\n---\nCopilot Prompt:\n' + prompt);
+
+
+
+
+
+  const sec = document.createElement('div');
+  sec.className = 'result-section';
+
+  sec.innerHTML = `
+    <div class="result-header">
+      <div style="margin-bottom:14px;">
+        <button onclick="goBackFromResult()" style="background:transparent;border:1px solid var(--border);border-radius:8px;padding:8px 16px;font-family:inherit;font-size:12px;color:var(--muted);cursor:pointer;transition:all 0.15s;" onmouseenter="this.style.color='var(--text)';this.style.borderColor='var(--border-strong)';" onmouseleave="this.style.color='var(--muted)';this.style.borderColor='var(--border)';">← Back to log</button>
+      </div>
+      <h2>Loaded from record.</h2>
+      <p>Viewing a previously saved assessment. No new record has been created.</p>
+      <div style="margin-top:16px;display:inline-flex;align-items:center;gap:10px;background:var(--accent-light);border:1px solid var(--accent);border-radius:10px;padding:10px 16px;flex-wrap:wrap;">
+        <span style="font-size:11px;text-transform:uppercase;letter-spacing:0.1em;color:var(--accent);font-weight:500;">Subject</span>
+        <span style="font-size:14px;font-weight:500;color:var(--accent);">\${answers[0]||''}</span>
+        <span style="font-size:14px;font-weight:500;color:#7c3aed;">\${answers[2]||''}</span>
+        <span style="font-size:14px;font-weight:500;color:var(--text);">\${answers[1]||''}</span>
+      </div>
+    </div>`;
+
+  const rg = document.createElement('div');
+  rg.className = 'result-grid';
+  const left = document.createElement('div');
+
+  // Calculated fields
+  const apR  = getAccessPassage();
+  const epR  = getEmergencyPassage();
+  const ppeR = getPipeProtection();
+  const atR  = getAssessmentText();
+  const mpR  = getMinPassageNote();
+  if (apR || epR || ppeR || atR || mpR) {
+    const calcLbl = document.createElement('div');
+    calcLbl.className = 'prompt-label';
+    calcLbl.textContent = 'Calculated fields';
+    left.appendChild(calcLbl);
+    const calcGrid = document.createElement('div');
+    calcGrid.style.cssText = 'display:flex;flex-direction:column;gap:8px;margin-bottom:20px;';
+    if (apR) calcGrid.appendChild(makeAutoCard('#f0fdf4','#16a34a','#166534','#14532d','Access Passage', apR));
+    if (epR) calcGrid.appendChild(makeAutoCard('#fff7ed','#ea580c','#9a3412','#7c2d12','Emergency Access Passage', epR));
+    if (ppeR) {
+      const isAdv = ppeR.startsWith('Seek');
+      calcGrid.appendChild(makeAutoCard(isAdv?'#fef2f2':'#eff6ff',isAdv?'#dc2626':'#2563eb',isAdv?'#991b1b':'#1e40af',isAdv?'#7f1d1d':'#1e3a8a','Pipe Protection Envelope',ppeR));
+    }
+    if (atR) {
+      const isNA = atR.startsWith('Design & siting is NOT');
+      calcGrid.appendChild(makeAutoCard(isNA?'#fef2f2':'#f0fdf4',isNA?'#dc2626':'#16a34a',isNA?'#991b1b':'#166534',isNA?'#7f1d1d':'#14532d',isNA?'⚠ Assessment Outcome — Action Required':'✓ Assessment Outcome',atR));
+    }
+    if (mpR) calcGrid.appendChild(makeAutoCard('#fff7ed','#ea580c','#9a3412','#7c2d12','⚠ Min Access Passage Not Provided',mpR));
+    left.appendChild(calcGrid);
+  }
+
+  // Answers collapsed
+  const aw = document.createElement('div');
+  aw.style.cssText = 'margin-bottom:20px;border:1px solid var(--border);border-radius:10px;overflow:hidden;';
+  const at = document.createElement('div');
+  at.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:12px 16px;cursor:pointer;background:var(--surface);user-select:none;';
+  at.onmouseenter = () => at.style.background = 'var(--step-bg)';
+  at.onmouseleave = () => at.style.background = 'var(--surface)';
+  const atLbl = document.createElement('span');
+  atLbl.style.cssText = 'font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.1em;color:var(--muted);';
+  atLbl.textContent = 'Your answers (' + answers.filter(a => a !== 'N/A').length + ')';
+  const atChev = document.createElement('span');
+  atChev.style.cssText = 'font-size:11px;color:var(--muted);';
+  atChev.textContent = '▼';
+  at.appendChild(atLbl); at.appendChild(atChev);
+  const ab = document.createElement('div');
+  ab.style.cssText = 'display:none;padding:12px;background:var(--bg);';
+  const ag = document.createElement('div'); ag.className = 'recap-grid';
+  answers.forEach((a,i) => {
+    if (a === 'N/A') return;
+    const d = document.createElement('div'); d.className = 'answer-item';
+    d.innerHTML = '<div class="a-q">Q'+(i+1)+'. '+QS[i].text+'</div><div class="a-a">'+a+'</div>';
+    ag.appendChild(d);
+  });
+  ab.appendChild(ag);
+  at.onclick = () => { const o = ab.style.display!=='none'; ab.style.display=o?'none':'block'; atChev.textContent=o?'▼':'▲'; };
+  aw.appendChild(at); aw.appendChild(ab);
+  left.appendChild(aw);
+
+  const pl = document.createElement('div'); pl.className = 'prompt-label'; pl.textContent = 'Your Copilot prompt';
+  left.appendChild(pl);
+  const pb = document.createElement('div'); pb.className = 'prompt-box'; pb.textContent = prompt;
+  left.appendChild(pb);
+
+  // Right panel — actions only, no new record saving
+  const right = document.createElement('div');
+  const emailCard = document.createElement('div');
+  emailCard.className = 'steps-card';
+  emailCard.innerHTML = '<div class="steps-title">Send assessment</div><p style="font-size:12px;color:var(--muted);margin-bottom:14px;line-height:1.6;">Opens your email client addressed to the <strong>Icon Water team inbox</strong>.</p>';
+  const emailBtn = document.createElement('a');
+  emailBtn.href = mailtoUrl;
+  emailBtn.style.cssText = 'display:block;width:100%;padding:13px;background:var(--accent);color:#fff;border:none;border-radius:10px;font-family:inherit;font-size:12px;font-weight:500;letter-spacing:0.06em;text-transform:uppercase;cursor:pointer;text-align:center;text-decoration:none;box-sizing:border-box;transition:opacity 0.15s;margin-bottom:8px;';
+  emailBtn.textContent = '✉ Send to Team Inbox (Icon Water)';
+  emailCard.appendChild(emailBtn);
+  right.appendChild(emailCard);
+
+  const cb2 = document.createElement('button'); cb2.className = 'copy-btn'; cb2.style.marginTop = '10px'; cb2.textContent = 'Copy Copilot prompt';
+  cb2.onclick = () => navigator.clipboard.writeText(prompt).then(() => { cb2.textContent = '✓ Copied!'; setTimeout(()=>cb2.textContent='Copy Copilot prompt',3000); });
+  right.appendChild(cb2);
+
+  const rb2 = document.createElement('button'); rb2.className = 'restart-btn'; rb2.style.marginTop = '10px'; rb2.textContent = '↺ New assessment';
+  rb2.onclick = () => { cur = 0; answers = []; render(); };
+  right.appendChild(rb2);
+
+  rg.appendChild(left); rg.appendChild(right);
+  sec.appendChild(rg);
+
+  if (sewerIsYes() && answers[6] && answers[6] !== 'N/A') {
+    const ds = document.createElement('div'); ds.style.cssText = 'margin-top:28px;';
+    const dl = document.createElement('div'); dl.className = 'prompt-label'; dl.style.marginBottom = '10px'; dl.textContent = 'Cross-section diagram';
+    ds.appendChild(dl);
+    const dc = document.createElement('div'); dc.id = 'diagram-full'; dc.style.cssText = 'background:#ffffff;border:1px solid var(--border);border-radius:16px;padding:20px;overflow:hidden;';
+    dc.innerHTML = buildCrossSectionSVG(false);
+    ds.appendChild(dc);
+    sec.appendChild(ds);
+  }
+
+  main.innerHTML = '';
+  main.appendChild(sec);
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function showFeedbackSummary() {
+  const recs = (() => { try { return JSON.parse(localStorage.getItem('cmp_feedback') || '[]'); } catch(e) { return []; } })();
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:flex-start;justify-content:center;padding:40px 20px;overflow-y:auto;';
+  const modal = document.createElement('div');
+  modal.style.cssText = 'background:var(--surface);border-radius:16px;padding:32px;width:100%;max-width:620px;position:relative;';
+
+  const closeBtn = document.createElement('button');
+  closeBtn.style.cssText = 'position:absolute;top:16px;right:16px;background:transparent;border:none;font-size:20px;color:var(--muted);cursor:pointer;';
+  closeBtn.textContent = '✕';
+  closeBtn.onclick = () => overlay.remove();
+  modal.appendChild(closeBtn);
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+
+  const hdr = document.createElement('div');
+  hdr.style.cssText = 'margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid var(--border);';
+  hdr.innerHTML = '<div style="font-size:18px;font-weight:600;color:var(--text);margin-bottom:4px;">Comments & Suggestions</div>' +
+    '<div style="font-size:12px;color:var(--muted);">' + recs.length + ' saved comment' + (recs.length===1?'':'s') + '</div>';
+  modal.appendChild(hdr);
+
+  if (recs.length === 0) {
+    const empty = document.createElement('p');
+    empty.style.cssText = 'color:var(--muted);font-size:13px;';
+    empty.textContent = 'No comments saved yet.';
+    modal.appendChild(empty);
+  } else {
+    const list = document.createElement('div');
+    list.style.cssText = 'display:flex;flex-direction:column;gap:10px;max-height:400px;overflow-y:auto;margin-bottom:20px;';
+    [...recs].reverse().forEach(r => {
+      const item = document.createElement('div');
+      item.style.cssText = 'background:var(--bg);border-radius:10px;padding:14px;';
+      const dt = new Date(r.date).toLocaleString('en-AU', {day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});
+      item.innerHTML =
+        '<div style="font-size:10px;color:var(--muted);margin-bottom:6px;">' + dt + (r.cmpRef ? ' &nbsp;·&nbsp; ' + r.cmpRef : '') + '</div>' +
+        '<div style="font-size:13px;color:var(--text);line-height:1.6;">' + r.comment.replace(/</g,'&lt;') + '</div>';
+      list.appendChild(item);
+    });
+    modal.appendChild(list);
+
+    // Copy all as text
+    const cpAllBtn = document.createElement('button');
+    cpAllBtn.style.cssText = 'width:100%;padding:12px;background:var(--accent);color:#fff;border:none;border-radius:8px;font-family:inherit;font-size:12px;font-weight:500;cursor:pointer;margin-bottom:8px;letter-spacing:0.05em;text-transform:uppercase;';
+    cpAllBtn.textContent = 'Copy all comments to clipboard';
+    cpAllBtn.onclick = () => {
+      const txt = [...recs].reverse().map(r => {
+        const dt = new Date(r.date).toLocaleString('en-AU');
+        return '[' + dt + (r.cmpRef?' | '+r.cmpRef:'') + ']\n' + r.comment;
+      }).join('\n\n---\n\n');
+      navigator.clipboard.writeText(txt).then(() => { cpAllBtn.textContent = '✓ Copied!'; setTimeout(()=>{ cpAllBtn.textContent='Copy all comments to clipboard'; }, 2000); });
+    };
+    modal.appendChild(cpAllBtn);
+
+    // Clear all feedback
+    const clrBtn = document.createElement('button');
+    clrBtn.style.cssText = 'width:100%;padding:11px;background:transparent;border:1px solid var(--border);border-radius:8px;font-family:inherit;font-size:12px;color:var(--muted);cursor:pointer;';
+    clrBtn.textContent = '✕ Clear all comments';
+    clrBtn.onclick = () => {
+      if (confirm('Clear all saved comments? This cannot be undone.')) {
+        localStorage.removeItem('cmp_feedback');
+        overlay.remove();
+        renderResult();
+      }
+    };
+    modal.appendChild(clrBtn);
+  }
+
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
+}
+
+function showRecordDetail(rec) {
+  // Build a full-page overlay showing all record details
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:999;display:flex;align-items:flex-start;justify-content:center;padding:40px 20px;overflow-y:auto;';
+
+  const modal = document.createElement('div');
+  modal.style.cssText = 'background:var(--surface);border-radius:16px;padding:32px;width:100%;max-width:640px;position:relative;';
+
+  // Close button
+  const closeBtn = document.createElement('button');
+  closeBtn.style.cssText = 'position:absolute;top:16px;right:16px;background:transparent;border:none;font-size:20px;color:var(--muted);cursor:pointer;line-height:1;';
+  closeBtn.textContent = '✕';
+  closeBtn.onclick = () => overlay.remove();
+  modal.appendChild(closeBtn);
+
+  // Close on overlay click
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+
+  // Header
+  const dt = new Date(rec.date).toLocaleString('en-AU', {day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});
+  const hdr = document.createElement('div');
+  hdr.style.cssText = 'margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid var(--border);';
+  hdr.innerHTML =
+    '<div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.1em;margin-bottom:6px;">Assessment Record</div>' +
+    '<div style="font-size:18px;font-weight:600;color:var(--text);">' + (rec.cmpRef || '') + ' ' + (rec.commType || '') + ' ' + (rec.cmpId || '') + '</div>' +
+    '<div style="font-size:12px;color:var(--muted);margin-top:4px;">' + dt + '</div>';
+  modal.appendChild(hdr);
+
+  // Detail fields
+  const fields = [
+    ['CMP Reference',      rec.cmpRef],
+    ['CMP ID',             rec.cmpId],
+    ['Communication Type', rec.commType],
+    ['Sewer Infrastructure', rec.sewerInfra],
+    ['Manhole Present',    rec.manhole],
+    ['Pipe Diameter',      rec.pipeDiam ? rec.pipeDiam + ' mm' : ''],
+    ['Pipe Depth',         rec.pipeDepth ? 'approx. ' + rec.pipeDepth + ' m' : ''],
+    ['Boundary Offset',    rec.offset ? 'approx. ' + rec.offset + ' m' : ''],
+    ['Boundary Location',  rec.boundaryLoc],
+    ['Access Passage',     rec.accessPassage],
+    ['Emergency Access Passage', rec.emergencyPassage],
+    ['Pipe Protection Envelope', rec.ppe],
+  ];
+
+  const grid = document.createElement('div');
+  grid.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:20px;';
+  fields.forEach(([label, value]) => {
+    if (!value || value === 'N/A') return;
+    const cell = document.createElement('div');
+    cell.style.cssText = 'background:var(--bg);border-radius:8px;padding:10px 12px;';
+    cell.innerHTML =
+      '<div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:3px;">' + label + '</div>' +
+      '<div style="font-size:13px;font-weight:500;color:var(--text);">' + value + '</div>';
+    grid.appendChild(cell);
+  });
+  modal.appendChild(grid);
+
+  // Summary text
+  if (rec.summary) {
+    const sumLbl = document.createElement('div');
+    sumLbl.style.cssText = 'font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:8px;';
+    sumLbl.textContent = 'Full Summary';
+    modal.appendChild(sumLbl);
+    const sumBox = document.createElement('pre');
+    sumBox.style.cssText = 'background:var(--bg);border-radius:8px;padding:14px;font-size:11px;line-height:1.7;color:var(--text);white-space:pre-wrap;word-break:break-word;font-family:inherit;margin-bottom:16px;max-height:200px;overflow-y:auto;';
+    sumBox.textContent = rec.summary;
+    modal.appendChild(sumBox);
+  }
+
+  // Copy summary button
+  const cpBtn = document.createElement('button');
+  cpBtn.style.cssText = 'width:100%;padding:12px;background:var(--accent);color:#fff;border:none;border-radius:8px;font-family:inherit;font-size:12px;font-weight:500;cursor:pointer;letter-spacing:0.05em;text-transform:uppercase;';
+  cpBtn.textContent = 'Copy summary to clipboard';
+  cpBtn.onclick = () => {
+    navigator.clipboard.writeText(rec.summary || '').then(() => {
+      cpBtn.textContent = '✓ Copied!';
+      setTimeout(() => { cpBtn.textContent = 'Copy summary to clipboard'; }, 2000);
+    });
+  };
+  modal.appendChild(cpBtn);
+
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
+}
+
+function openInlineEdit(idx) {
+  // Show a small modal overlay to edit a single answer in-place
+  const q = QS[idx];
+  const currentVal = answers[idx];
+
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;';
+
+  const modal = document.createElement('div');
+  modal.style.cssText = 'background:var(--surface);border-radius:16px;padding:28px;width:100%;max-width:420px;box-shadow:0 8px 32px rgba(0,0,0,0.18);';
+
+  // Header
+  const hdr = document.createElement('div');
+  hdr.style.cssText = 'margin-bottom:20px;';
+  hdr.innerHTML =
+    '<div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:0.1em;margin-bottom:6px;">Q' + (idx+1) + ' of ' + QS.length + '</div>' +
+    '<div style="font-size:17px;font-weight:500;color:var(--text);line-height:1.4;">' + q.text + '</div>' +
+    (q.hint ? '<div style="font-size:11px;color:var(--subtle);margin-top:5px;">' + q.hint + '</div>' : '');
+  modal.appendChild(hdr);
+
+  // Input area
+  const inputArea = document.createElement('div');
+  let newVal = currentVal;
+
+  if (q.type === 'yesno') {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;gap:10px;';
+    ['Yes','No'].forEach(v => {
+      const btn = document.createElement('button');
+      btn.style.cssText = 'flex:1;padding:13px;border:1px solid var(--border);border-radius:10px;background:' + (currentVal===v?(v==='Yes'?'var(--yes-bg)':'var(--no-bg)'):'var(--bg)') + ';color:' + (currentVal===v?(v==='Yes'?'var(--yes-text)':'var(--no-text)'):'var(--text)') + ';font-family:inherit;font-size:13px;cursor:pointer;transition:all 0.15s;';
+      if (currentVal===v) btn.style.borderColor = v==='Yes'?'var(--yes-border)':'var(--no-border)';
+      btn.textContent = v;
+      btn.onclick = () => {
+        row.querySelectorAll('button').forEach(b => { b.style.background='var(--bg)'; b.style.color='var(--text)'; b.style.borderColor='var(--border)'; });
+        btn.style.background = v==='Yes'?'var(--yes-bg)':'var(--no-bg)';
+        btn.style.color = v==='Yes'?'var(--yes-text)':'var(--no-text)';
+        btn.style.borderColor = v==='Yes'?'var(--yes-border)':'var(--no-border)';
+        newVal = v;
+      };
+      row.appendChild(btn);
+    });
+    inputArea.appendChild(row);
+
+  } else if (q.type === 'choice') {
+    const col = document.createElement('div');
+    col.style.cssText = 'display:flex;flex-direction:column;gap:8px;';
+    q.options.forEach(opt => {
+      const btn = document.createElement('button');
+      const sel = currentVal === opt;
+      btn.style.cssText = 'width:100%;text-align:left;padding:12px 16px;border-radius:10px;border:1px solid ' + (sel?'#7c3aed':'var(--border)') + ';background:' + (sel?'#f3f0ff':'var(--bg)') + ';color:' + (sel?'#4c1d95':'var(--text)') + ';font-family:inherit;font-size:13px;cursor:pointer;transition:all 0.15s;';
+      btn.textContent = opt;
+      btn.onclick = () => {
+        col.querySelectorAll('button').forEach(b => { b.style.borderColor='var(--border)'; b.style.background='var(--bg)'; b.style.color='var(--text)'; });
+        btn.style.borderColor='#7c3aed'; btn.style.background='#f3f0ff'; btn.style.color='#4c1d95';
+        newVal = opt;
+      };
+      col.appendChild(btn);
+    });
+    inputArea.appendChild(col);
+
+  } else if (q.type === 'text') {
+    const ta = document.createElement('textarea');
+    ta.rows = 3;
+    ta.value = currentVal;
+    ta.style.cssText = 'width:100%;padding:11px 14px;border:1px solid var(--border);border-radius:10px;background:var(--bg);color:var(--text);font-family:inherit;font-size:13px;resize:vertical;outline:none;box-sizing:border-box;';
+    ta.oninput = () => { newVal = ta.value.trim(); };
+    inputArea.appendChild(ta);
+    setTimeout(() => ta.focus(), 60);
+
+  } else {
+    const inp = document.createElement('input');
+    inp.type = 'number'; inp.min = 0; inp.value = currentVal;
+    inp.style.cssText = 'width:100%;padding:11px 14px;border:1px solid var(--border);border-radius:10px;background:var(--bg);color:var(--text);font-family:inherit;font-size:13px;outline:none;box-sizing:border-box;';
+    inp.oninput = () => { newVal = inp.value.trim(); };
+    inputArea.appendChild(inp);
+    setTimeout(() => inp.focus(), 60);
+  }
+
+  modal.appendChild(inputArea);
+
+  // Buttons
+  const btnRow = document.createElement('div');
+  btnRow.style.cssText = 'display:flex;gap:10px;margin-top:20px;';
+
+  const saveBtn = document.createElement('button');
+  saveBtn.style.cssText = 'flex:1;padding:13px;background:var(--accent);color:#fff;border:none;border-radius:10px;font-family:inherit;font-size:12px;font-weight:500;letter-spacing:0.05em;text-transform:uppercase;cursor:pointer;';
+  saveBtn.textContent = 'Save change';
+  saveBtn.onclick = () => {
+    if (newVal === undefined || newVal === '') { overlay.remove(); return; }
+    answers[idx] = newVal;
+    // If Q4 changed to No, re-apply skip placeholders for Q5-Q11
+    if (idx === 3 && newVal === 'No') {
+      for (let k = 4; k <= 11; k++) answers[k] = 'N/A';
+    }
+    // If Q4 changed to Yes, clear the N/A placeholders so user can re-answer
+    if (idx === 3 && newVal === 'Yes') {
+      for (let k = 4; k <= 11; k++) { if (answers[k] === 'N/A') answers[k] = undefined; }
+      answers = answers.filter(a => a !== undefined);
+      cur = 4; // send them to Q5 to fill in sewer details
+      overlay.remove();
+      render();
+      return;
+    }
+    // Update liveRef/liveId if Q1 or Q2 changed
+    if (idx === 0) liveRef = newVal;
+    if (idx === 1) liveId  = newVal;
+    overlay.remove();
+    render(); // re-render current question with updated answers
+  };
+
+  const cancelBtn = document.createElement('button');
+  cancelBtn.style.cssText = 'padding:13px 20px;background:transparent;border:1px solid var(--border);border-radius:10px;font-family:inherit;font-size:12px;color:var(--muted);cursor:pointer;';
+  cancelBtn.textContent = 'Cancel';
+  cancelBtn.onclick = () => overlay.remove();
+
+  btnRow.appendChild(saveBtn);
+  btnRow.appendChild(cancelBtn);
+  modal.appendChild(btnRow);
+
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
+}
+
+function goBackFromResult() {
+  // Remove the last answer and go back to the last question
+  if (answers.length > 0) {
+    answers.pop();
+    cur = answers.length;
+    render();
+  }
+}
+
 function render() {
+  const scrollY = window.scrollY;
   main.innerHTML = '';
   cur < QS.length ? renderQ() : renderResult();
+  // Preserve scroll position during re-renders (e.g. inline edits)
+  window.scrollTo({ top: scrollY, behavior: 'instant' });
 }
 
 function renderQ() {
@@ -1012,10 +1530,13 @@ function renderQ() {
     if (cur === 3 && pending === 'No') {
       answers.push('N/A'); // Q5 manhole
       answers.push('N/A'); // Q6 pipe diameter
-      answers.push('N/A'); // Q7 boundary
-      answers.push('N/A'); // Q8 pipe depth
-      answers.push('N/A'); // Q9 boundary offset
-      cur = 9; // jump straight to Q10
+      answers.push('N/A'); // Q7 pipe depth
+      answers.push('N/A'); // Q8 boundary offset
+      answers.push('N/A'); // Q9 boundary location
+      answers.push('N/A'); // Q10 PPE clear
+      answers.push('N/A'); // Q11 structures in ZOI
+      answers.push('N/A'); // Q12 min access passage
+      cur = 12; // jump past all sewer questions
     } else {
       cur++;
     }
@@ -1036,6 +1557,117 @@ function renderQ() {
       const defBtn = ia.querySelector('[data-v="' + q.defaultVal + '"]');
       if (defBtn) { defBtn.click(); }
     }
+
+  } else if (q.type === 'compass') {
+    // Two-column layout: Front/Rear on left, SVG compass (N/S/E/W) on right
+    const compassWrap = document.createElement('div');
+    compassWrap.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:center;';
+
+    // Left col: Front + Rear buttons
+    const leftCol = document.createElement('div');
+    leftCol.style.cssText = 'display:flex;flex-direction:column;gap:8px;';
+
+    const allBtns = {};
+    const selectDir = (val) => {
+      Object.entries(allBtns).forEach(([k,b]) => {
+        b.style.borderColor = 'var(--border)'; b.style.background = 'var(--bg)'; b.style.color = 'var(--text)';
+        b.style.fontWeight = '400';
+      });
+      if (allBtns[val]) {
+        allBtns[val].style.borderColor = '#7c3aed';
+        allBtns[val].style.background = '#f3f0ff';
+        allBtns[val].style.color = '#4c1d95';
+        allBtns[val].style.fontWeight = '600';
+      }
+      pending = val; nb.disabled = false;
+      refreshSubjectPreview();
+      // Update compass SVG highlight
+      const svg = compassWrap.querySelector('svg');
+      if (svg) {
+        svg.querySelectorAll('[data-dir]').forEach(el => {
+          const active = el.getAttribute('data-dir') === val;
+          if (el.tagName === 'circle') { el.setAttribute('fill', active ? '#7c3aed' : '#e8e4f0'); }
+          if (el.tagName === 'text') { el.setAttribute('fill', active ? '#fff' : '#4c1d95'); el.setAttribute('font-weight', active ? '700' : '400'); }
+        });
+      }
+    };
+
+    ['Front','Rear'].forEach(opt => {
+      const btn = document.createElement('button');
+      btn.style.cssText = 'width:100%;text-align:center;padding:14px;font-size:13px;border-radius:10px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-family:inherit;cursor:pointer;transition:all 0.15s;';
+      btn.textContent = opt;
+      btn.onclick = () => selectDir(opt);
+      allBtns[opt] = btn;
+      leftCol.appendChild(btn);
+    });
+    compassWrap.appendChild(leftCol);
+
+    // Right col: SVG compass rose for N/S/E/W
+    const rightCol = document.createElement('div');
+    rightCol.style.cssText = 'display:flex;align-items:center;justify-content:center;';
+
+    const svgNS = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(svgNS, 'svg');
+    svg.setAttribute('viewBox', '0 0 160 160');
+    svg.style.cssText = 'width:140px;height:140px;';
+
+    // Compass background circle
+    const bg = document.createElementNS(svgNS, 'circle');
+    bg.setAttribute('cx','80'); bg.setAttribute('cy','80'); bg.setAttribute('r','76');
+    bg.setAttribute('fill','var(--bg)'); bg.setAttribute('stroke','var(--border)'); bg.setAttribute('stroke-width','1.5');
+    svg.appendChild(bg);
+
+    // Cross lines
+    [['80','8','80','152'],['8','80','152','80']].forEach(([x1,y1,x2,y2]) => {
+      const l = document.createElementNS(svgNS, 'line');
+      l.setAttribute('x1',x1); l.setAttribute('y1',y1); l.setAttribute('x2',x2); l.setAttribute('y2',y2);
+      l.setAttribute('stroke','var(--border)'); l.setAttribute('stroke-width','1');
+      svg.appendChild(l);
+    });
+
+    // Direction buttons as SVG circles + text
+    const dirs = [{d:'North',x:80,y:22},{d:'South',x:80,y:138},{d:'East',x:138,y:80},{d:'West',x:22,y:80}];
+    dirs.forEach(({d,x,y}) => {
+      const g = document.createElementNS(svgNS, 'g');
+      g.style.cursor = 'pointer';
+
+      const c = document.createElementNS(svgNS, 'circle');
+      c.setAttribute('cx',x); c.setAttribute('cy',y); c.setAttribute('r','18');
+      c.setAttribute('fill','#e8e4f0'); c.setAttribute('data-dir', d);
+      c.setAttribute('stroke','#c4b5fd'); c.setAttribute('stroke-width','1');
+
+      const t = document.createElementNS(svgNS, 'text');
+      t.setAttribute('x',x); t.setAttribute('y',y+5);
+      t.setAttribute('text-anchor','middle'); t.setAttribute('font-size','12');
+      t.setAttribute('font-family','inherit'); t.setAttribute('fill','#4c1d95');
+      t.setAttribute('data-dir', d);
+      t.textContent = d[0]; // N S E W
+
+      g.appendChild(c); g.appendChild(t);
+      g.onclick = () => selectDir(d);
+      // Hover effect
+      g.onmouseenter = () => { if (pending !== d) { c.setAttribute('fill','#ddd6fe'); } };
+      g.onmouseleave = () => { if (pending !== d) { c.setAttribute('fill','#e8e4f0'); } };
+
+      svg.appendChild(g);
+      allBtns[d] = {
+        style: { set borderColor(v){}, set background(v){}, set color(v){}, set fontWeight(v){} }
+      };
+      // Override selectDir for SVG elements: handled via svg querySelectorAll above
+    });
+
+    // Centre compass rose decoration
+    const centre = document.createElementNS(svgNS, 'circle');
+    centre.setAttribute('cx','80'); centre.setAttribute('cy','80'); centre.setAttribute('r','8');
+    centre.setAttribute('fill','var(--border)');
+    svg.appendChild(centre);
+
+    rightCol.appendChild(svg);
+    compassWrap.appendChild(rightCol);
+    ia.appendChild(compassWrap);
+
+    // Apply default
+    if (q.defaultVal) setTimeout(() => selectDir(q.defaultVal), 50);
 
   } else if (q.type === 'choice') {
     const choiceRow = document.createElement('div');
@@ -1063,7 +1695,7 @@ function renderQ() {
 
   } else if (q.type === 'text') {
     const ta = document.createElement('textarea');
-    ta.rows = 4; ta.placeholder = 'Type your answer here…';
+    ta.rows = 4; ta.placeholder = 'Type your answer here...';
     ta.oninput = () => {
       pending = ta.value.trim();
       nb.disabled = !pending;
@@ -1100,7 +1732,7 @@ function renderQ() {
     bb.onmouseleave = () => { bb.style.borderColor = 'var(--border)'; bb.style.color = 'var(--muted)'; };
     bb.onclick = () => {
       // Remove last answer; if we jumped from Q4=No (cur===8 with 8 answers) undo the skip
-      if (cur === 9 && answers[3] === 'No') {
+      if (cur === 12 && answers[3] === 'No') {
         answers.splice(3); // remove Q4 answer and all N/A placeholders
         cur = 3;
       } else {
@@ -1124,6 +1756,7 @@ function renderQ() {
   // RIGHT — subject preview + answers log
   const right = document.createElement('div');
   right.className = 'answers-panel';
+  right.style.minHeight = '600px';  // keep layout stable between question renders
 
   // Subject card header row with copy link
   const subjectCard = document.createElement('div');
@@ -1167,35 +1800,58 @@ function renderQ() {
   // Show copy link if there's already content
   if (subjectPlainText().replace(/\[.*?\]/g,'').trim()) copyLink.style.display = 'inline';
 
-  // ── Auto-calculated section (sits below subject preview, above answers) ──
+  // ── Calculated fields — compiled below subject preview ─────────────────────
   const ap  = getAccessPassage();
   const ep  = getEmergencyPassage();
   const ppe = getPipeProtection();
-  if (ap || ep || ppe) {
+  const assessText  = getAssessmentText();
+  const minPassNote = getMinPassageNote();
+
+  if (ap || ep || ppe || assessText || minPassNote) {
     const autoSection = document.createElement('div');
     autoSection.style.cssText = 'display:flex;flex-direction:column;gap:6px;margin-bottom:10px;';
 
     const autoLbl = document.createElement('div');
     autoLbl.className = 'panel-label';
-    autoLbl.textContent = 'Auto-calculated';
+    autoLbl.textContent = 'Calculated fields';
     autoSection.appendChild(autoLbl);
 
     if (ap)  autoSection.appendChild(makeAutoCard('#f0fdf4','#16a34a','#166534','#14532d','Access Passage', ap));
     if (ep)  autoSection.appendChild(makeAutoCard('#fff7ed','#ea580c','#9a3412','#7c2d12','Emergency Access Passage', ep));
     if (ppe) {
-      const isAdvice = ppe.startsWith('Seek');
+      const isAdv = ppe.startsWith('Seek');
       autoSection.appendChild(makeAutoCard(
-        isAdvice ? '#fef2f2' : '#eff6ff',
-        isAdvice ? '#dc2626' : '#2563eb',
-        isAdvice ? '#991b1b' : '#1e40af',
-        isAdvice ? '#7f1d1d' : '#1e3a8a',
+        isAdv ? '#fef2f2' : '#eff6ff',
+        isAdv ? '#dc2626' : '#2563eb',
+        isAdv ? '#991b1b' : '#1e40af',
+        isAdv ? '#7f1d1d' : '#1e3a8a',
         'Pipe Protection Envelope', ppe
       ));
     }
 
+    if (assessText) {
+      const isNA = assessText.startsWith('Design & siting is NOT');
+      autoSection.appendChild(makeAutoCard(
+        isNA ? '#fef2f2' : '#f0fdf4',
+        isNA ? '#dc2626' : '#16a34a',
+        isNA ? '#991b1b' : '#166534',
+        isNA ? '#7f1d1d' : '#14532d',
+        isNA ? '⚠ Assessment Outcome' : '✓ Assessment Outcome',
+        assessText
+      ));
+    } else if (answers.length >= 10 && answers[9] && answers[9] !== 'N/A') {
+      const pendCard = document.createElement('div');
+      pendCard.style.cssText = 'background:#fafaf9;border:1px dashed var(--border);border-radius:10px;padding:10px 14px;';
+      pendCard.innerHTML = '<div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;color:var(--subtle);margin-bottom:4px;">Assessment Outcome</div><div style="font-size:11px;color:var(--subtle);">Answer Q11 to generate assessment...</div>';
+      autoSection.appendChild(pendCard);
+    }
+
+    if (minPassNote) {
+      autoSection.appendChild(makeAutoCard('#fff7ed','#ea580c','#9a3412','#7c2d12','⚠ Min Access Passage Not Provided', minPassNote));
+    }
+
     right.appendChild(autoSection);
   }
-
   // ── Live cross-section diagram — below auto-calc, above answers ───────────
   if (sewerIsYes() && answers.length > 7 && answers[6] && answers[6] !== 'N/A') {
     const diagLbl = document.createElement('div');
@@ -1237,27 +1893,61 @@ function renderQ() {
     right.appendChild(diagWrap);
   }
 
+  // ── Answers section — collapsible, collapsed by default ────────────────────
+  const answersWrap = document.createElement('div');
+  answersWrap.style.cssText = 'margin-top:4px;';
+
+  const answersToggleRow = document.createElement('div');
+  answersToggleRow.style.cssText = 'display:flex;align-items:center;justify-content:space-between;cursor:pointer;padding:6px 0;user-select:none;';
+
   const panelLbl = document.createElement('div');
   panelLbl.className = 'panel-label';
-  panelLbl.style.marginTop = '4px';
+  panelLbl.style.cssText = 'margin:0;';
   panelLbl.textContent = 'Your answers so far';
-  right.appendChild(panelLbl);
+
+  const toggleIcon = document.createElement('span');
+  toggleIcon.style.cssText = 'font-size:11px;color:var(--muted);transition:transform 0.2s;';
+  toggleIcon.textContent = '▼';
+
+  answersToggleRow.appendChild(panelLbl);
+  answersToggleRow.appendChild(toggleIcon);
+
+  const answersBody = document.createElement('div');
+  answersBody.style.cssText = 'display:none;flex-direction:column;gap:6px;margin-top:6px;';  // collapsed by default
+
+  answersToggleRow.onclick = () => {
+    const isOpen = answersBody.style.display !== 'none';
+    answersBody.style.display = isOpen ? 'none' : 'flex';
+    toggleIcon.textContent = isOpen ? '▼' : '▲';
+  };
 
   if (!answers.length) {
     const emp = document.createElement('div');
     emp.className = 'empty-panel';
     emp.textContent = 'Your answers will build up here as you go through each question.';
-    right.appendChild(emp);
+    answersBody.appendChild(emp);
   } else {
-    const visibleQs = QS.slice(0, answers.length);
     answers.forEach((a, i) => {
-      if (a === 'N/A') return; // skip auto-filled skipped questions
+      if (a === 'N/A') return;
       const d = document.createElement('div');
-      d.className = 'answer-item' + (i === answers.length - 1 ? ' new' : '');
-      d.innerHTML = '<div class="a-q">Q' + (i+1) + '. ' + QS[i].text.substring(0,45) + (QS[i].text.length>45?'…':'') + '</div><div class="a-a">' + a + '</div>';
-      right.appendChild(d);
+      d.className = 'answer-item';
+      d.style.cssText = 'cursor:pointer;position:relative;transition:background 0.15s;border-radius:8px;';
+      d.onmouseenter = () => d.style.background = 'var(--step-bg)';
+      d.onmouseleave = () => d.style.background = '';
+      d.innerHTML =
+        '<div class="a-q">Q' + (i+1) + '. ' + QS[i].text.substring(0,45) + (QS[i].text.length>45?'...':'') + '</div>' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;">' +
+          '<div class="a-a">' + a + '</div>' +
+          '<div style="font-size:10px;color:var(--accent);font-weight:500;padding-left:8px;white-space:nowrap;">Edit ›</div>' +
+        '</div>';
+      d.onclick = () => openInlineEdit(i);
+      answersBody.appendChild(d);
     });
   }
+
+  answersWrap.appendChild(answersToggleRow);
+  answersWrap.appendChild(answersBody);
+  right.appendChild(answersWrap);
 
   grid.appendChild(left);
   grid.appendChild(right);
@@ -1378,6 +2068,9 @@ function renderResult() {
 
   sec.innerHTML = `
     <div class="result-header">
+      <div style="margin-bottom:14px;">
+        <button onclick="goBackFromResult()" style="background:transparent;border:1px solid var(--border);border-radius:8px;padding:8px 16px;font-family:inherit;font-size:12px;color:var(--muted);cursor:pointer;transition:all 0.15s;" onmouseenter="this.style.color='var(--text)';this.style.borderColor='var(--border-strong)';" onmouseleave="this.style.color='var(--muted)';this.style.borderColor='var(--border)';">← Edit answers</button>
+      </div>
       <h2>Assessment complete.</h2>
       <p>Record saved locally. Copy the Copilot prompt or send the assessment summary by email.</p>
       <div style="margin-top:16px;display:inline-flex;align-items:center;gap:10px;background:var(--accent-light);border:1px solid var(--accent);border-radius:10px;padding:10px 16px;flex-wrap:wrap;">
@@ -1385,61 +2078,138 @@ function renderResult() {
         <span style="font-size:14px;font-weight:500;color:var(--accent);">${answers[0]||''}</span>
         <span style="font-size:14px;font-weight:500;color:#7c3aed;">${answers[2]||''}</span>
         <span style="font-size:14px;font-weight:500;color:var(--text);">${answers[1]||''}</span>
+        <button id="result-subject-copy" onclick="(function(){const s=[answers[0],answers[2],answers[1]].filter(Boolean).join(' ');navigator.clipboard.writeText(s).then(()=>{const b=document.getElementById('result-subject-copy');b.textContent='✓';setTimeout(()=>b.textContent='Copy',2000);});})()" style="margin-left:4px;padding:3px 10px;font-size:11px;font-weight:500;background:transparent;border:1px solid var(--accent);border-radius:6px;color:var(--accent);cursor:pointer;font-family:inherit;transition:all 0.15s;" onmouseenter="this.style.background='var(--accent)';this.style.color='#fff';" onmouseleave="this.style.background='transparent';this.style.color='var(--accent)';">Copy</button>
       </div>
     </div>`;
 
   const rg = document.createElement('div');
   rg.className = 'result-grid';
 
-  // LEFT — recap + prompt
+  // LEFT — calculated fields up front, answers collapsed below, then prompt
   const left = document.createElement('div');
 
-  // Answers recap
-  const recapLabel = document.createElement('div');
-  recapLabel.className = 'prompt-label';
-  recapLabel.textContent = 'Your answers';
-  left.appendChild(recapLabel);
+  // ── Calculated fields section (always visible) ────────────────────────────
+  const calcFields = [];
+  const apR  = getAccessPassage();
+  const epR  = getEmergencyPassage();
+  const ppeR = getPipeProtection();
+  const atR  = getAssessmentText();
+  const mpR  = getMinPassageNote();
+  if (apR || epR || ppeR || atR || mpR) {
+    const calcLbl = document.createElement('div');
+    calcLbl.className = 'prompt-label';
+    calcLbl.textContent = 'Calculated fields';
+    left.appendChild(calcLbl);
+
+    const calcGrid = document.createElement('div');
+    calcGrid.style.cssText = 'display:flex;flex-direction:column;gap:8px;margin-bottom:20px;';
+
+    if (apR) calcGrid.appendChild(makeAutoCard('#f0fdf4','#16a34a','#166534','#14532d','Access Passage', apR));
+    if (epR) calcGrid.appendChild(makeAutoCard('#fff7ed','#ea580c','#9a3412','#7c2d12','Emergency Access Passage', epR));
+    if (ppeR) {
+      const isAdv = ppeR.startsWith('Seek');
+      calcGrid.appendChild(makeAutoCard(
+        isAdv ? '#fef2f2' : '#eff6ff',
+        isAdv ? '#dc2626' : '#2563eb',
+        isAdv ? '#991b1b' : '#1e40af',
+        isAdv ? '#7f1d1d' : '#1e3a8a',
+        'Pipe Protection Envelope', ppeR
+      ));
+    }
+    if (atR) {
+      const isNA = atR.startsWith('Design & siting is NOT');
+      calcGrid.appendChild(makeAutoCard(
+        isNA ? '#fef2f2' : '#f0fdf4',
+        isNA ? '#dc2626' : '#16a34a',
+        isNA ? '#991b1b' : '#166534',
+        isNA ? '#7f1d1d' : '#14532d',
+        isNA ? '⚠ Assessment Outcome — Action Required' : '✓ Assessment Outcome',
+        atR
+      ));
+    }
+    if (mpR) calcGrid.appendChild(makeAutoCard('#fff7ed','#ea580c','#9a3412','#7c2d12','⚠ Min Access Passage Not Provided', mpR));
+
+    left.appendChild(calcGrid);
+  }
+
+  // ── Your answers — collapsed by default ───────────────────────────────────
+  const answersWrap = document.createElement('div');
+  answersWrap.style.cssText = 'margin-bottom:20px;border:1px solid var(--border);border-radius:10px;overflow:hidden;';
+
+  const answersToggle = document.createElement('div');
+  answersToggle.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:12px 16px;cursor:pointer;background:var(--surface);user-select:none;';
+  answersToggle.onmouseenter = () => answersToggle.style.background = 'var(--step-bg)';
+  answersToggle.onmouseleave = () => answersToggle.style.background = 'var(--surface)';
+
+  const answersToggleLbl = document.createElement('span');
+  answersToggleLbl.style.cssText = 'font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.1em;color:var(--muted);';
+  answersToggleLbl.textContent = 'Your answers (' + answers.filter(a => a !== 'N/A').length + ')';
+
+  const toggleChev = document.createElement('span');
+  toggleChev.style.cssText = 'font-size:11px;color:var(--muted);';
+  toggleChev.textContent = '▼';
+
+  answersToggle.appendChild(answersToggleLbl);
+  answersToggle.appendChild(toggleChev);
+
+  const answersBody = document.createElement('div');
+  answersBody.style.cssText = 'display:none;padding:12px;background:var(--bg);';
 
   const recap = document.createElement('div');
   recap.className = 'recap-grid';
   answers.forEach((a, i) => {
-    if (a === 'N/A') return; // skip auto-filled placeholders
+    if (a === 'N/A') return;
     const d = document.createElement('div');
     d.className = 'answer-item';
     d.innerHTML = '<div class="a-q">Q' + (i+1) + '. ' + QS[i].text + '</div><div class="a-a">' + a + '</div>';
     recap.appendChild(d);
-    // Insert auto-calculated cards after pipe depth (index 7)
-    if (i === 7) {
-      const ap  = getAccessPassage();
-      const ep  = getEmergencyPassage();
-      const ppe = getPipeProtection();
-      if (ap)  recap.appendChild(makeAutoCard('#f0fdf4','#16a34a','#166534','#14532d','Access Passage', ap));
-      if (ep)  recap.appendChild(makeAutoCard('#fff7ed','#ea580c','#9a3412','#7c2d12','Emergency Access Passage', ep));
-      if (ppe) {
-        const isAdvice = ppe.startsWith('Seek');
-        recap.appendChild(makeAutoCard(
-          isAdvice ? '#fef2f2' : '#eff6ff',
-          isAdvice ? '#dc2626' : '#2563eb',
-          isAdvice ? '#991b1b' : '#1e40af',
-          isAdvice ? '#7f1d1d' : '#1e3a8a',
-          'Pipe Protection Envelope', ppe
-        ));
-      }
-    }
   });
-  left.appendChild(recap);
+  answersBody.appendChild(recap);
 
-  // Prompt
-  const pl = document.createElement('div');
-  pl.className = 'prompt-label';
-  pl.style.marginTop = '24px';
-  pl.textContent = 'Your Copilot prompt';
-  left.appendChild(pl);
+  answersToggle.onclick = () => {
+    const open = answersBody.style.display !== 'none';
+    answersBody.style.display = open ? 'none' : 'block';
+    toggleChev.textContent = open ? '▼' : '▲';
+  };
 
+  answersWrap.appendChild(answersToggle);
+  answersWrap.appendChild(answersBody);
+  left.appendChild(answersWrap);
+
+  // ── Copilot prompt — collapsible, collapsed by default ──────────────────────
+  const promptWrap = document.createElement('div');
+  promptWrap.style.cssText = 'margin-bottom:8px;border:1px solid var(--border);border-radius:10px;overflow:hidden;';
+
+  const promptToggle = document.createElement('div');
+  promptToggle.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:12px 16px;cursor:pointer;background:var(--surface);user-select:none;';
+  promptToggle.onmouseenter = () => promptToggle.style.background = 'var(--step-bg)';
+  promptToggle.onmouseleave = () => promptToggle.style.background = 'var(--surface)';
+  const ptLbl = document.createElement('span');
+  ptLbl.style.cssText = 'font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.1em;color:var(--muted);';
+  ptLbl.textContent = 'Your Copilot prompt';
+  const ptChev = document.createElement('span');
+  ptChev.style.cssText = 'font-size:11px;color:var(--muted);';
+  ptChev.textContent = '▼';
+  promptToggle.appendChild(ptLbl);
+  promptToggle.appendChild(ptChev);
+
+  const promptBody = document.createElement('div');
+  promptBody.style.cssText = 'display:none;padding:0;';
   const pb = document.createElement('div');
   pb.className = 'prompt-box';
+  pb.style.cssText = 'margin:0;border:none;border-radius:0;';
   pb.textContent = prompt;
-  left.appendChild(pb);
+  promptBody.appendChild(pb);
+
+  promptToggle.onclick = () => {
+    const open = promptBody.style.display !== 'none';
+    promptBody.style.display = open ? 'none' : 'block';
+    ptChev.textContent = open ? '▼' : '▲';
+  };
+
+  promptWrap.appendChild(promptToggle);
+  promptWrap.appendChild(promptBody);
+  left.appendChild(promptWrap);
 
   // RIGHT — actions panel
   const right = document.createElement('div');
@@ -1491,23 +2261,55 @@ function renderResult() {
     noRec.textContent = 'No records yet.';
     logCard.appendChild(noRec);
   } else {
-    // Show last 5 records, newest first
-    const recent = [...records].reverse().slice(0, 5);
-    recent.forEach(rec => {
+    // Show all records, newest first, each clickable
+    const sorted = [...records].reverse();
+    sorted.forEach(rec => {
       const row = document.createElement('div');
-      row.style.cssText = 'padding:8px 0;border-bottom:0.5px solid var(--border);font-size:11px;';
+      row.style.cssText = 'padding:10px 8px;border-bottom:0.5px solid var(--border);font-size:11px;cursor:pointer;border-radius:6px;transition:background 0.15s;';
+      row.onmouseenter = () => row.style.background = 'var(--step-bg)';
+      row.onmouseleave = () => row.style.background = '';
       const dt = new Date(rec.date).toLocaleString('en-AU', {day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});
-      row.innerHTML =
-        '<div style="font-weight:500;color:var(--text);">' + (rec.cmpRef || '—') + ' ' + (rec.commType || '') + ' ' + (rec.cmpId || '') + '</div>' +
-        '<div style="color:var(--muted);margin-top:2px;">' + dt + ' &nbsp;·&nbsp; Depth: ' + (rec.pipeDepth || '—') + 'm &nbsp;·&nbsp; PPE: ' + (rec.ppe || '—') + '</div>';
+      row.style.cursor = 'default';
+      row.onmouseenter = null;
+      row.onmouseleave = null;
+      row.style.background = '';
+
+      // Row content
+      const rowInfo = document.createElement('div');
+      rowInfo.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;';
+      rowInfo.innerHTML =
+        '<div style="font-weight:600;color:var(--text);">' + (rec.cmpRef || '—') + ' ' + (rec.commType || '') + ' ' + (rec.cmpId || '') + '</div>';
+      const rowMeta = document.createElement('div');
+      rowMeta.style.cssText = 'color:var(--muted);font-size:11px;margin-bottom:6px;';
+      rowMeta.textContent = dt + ' · Depth: ' + (rec.pipeDepth || '—') + 'm · PPE: ' + (rec.ppe || '—');
+
+      // Action buttons
+      const rowBtns = document.createElement('div');
+      rowBtns.style.cssText = 'display:flex;gap:6px;';
+
+      const viewBtn = document.createElement('a');
+      viewBtn.href = '#';
+      viewBtn.style.cssText = 'font-size:10px;color:var(--accent);text-decoration:none;font-weight:500;border:1px solid var(--accent);border-radius:4px;padding:3px 9px;';
+      viewBtn.textContent = 'View ›';
+      viewBtn.onclick = (e) => { e.preventDefault(); showRecordDetail(rec); };
+
+      const loadBtn = document.createElement('a');
+      loadBtn.href = '#';
+      loadBtn.style.cssText = 'font-size:10px;color:var(--muted);text-decoration:none;font-weight:500;border:1px solid var(--border);border-radius:4px;padding:3px 9px;transition:all 0.15s;';
+      loadBtn.textContent = '⟳ Load';
+      loadBtn.title = 'Load this record into the calculator';
+      loadBtn.onmouseenter = () => { loadBtn.style.borderColor='var(--border-strong)'; loadBtn.style.color='var(--text)'; };
+      loadBtn.onmouseleave = () => { loadBtn.style.borderColor='var(--border)'; loadBtn.style.color='var(--muted)'; };
+      loadBtn.onclick = (e) => { e.preventDefault(); loadRecordIntoCalculator(rec); };
+
+      rowBtns.appendChild(viewBtn);
+      rowBtns.appendChild(loadBtn);
+
+      row.appendChild(rowInfo);
+      row.appendChild(rowMeta);
+      row.appendChild(rowBtns);
       logCard.appendChild(row);
     });
-    if (records.length > 5) {
-      const more = document.createElement('p');
-      more.style.cssText = 'font-size:11px;color:var(--muted);margin-top:6px;';
-      more.textContent = '+ ' + (records.length - 5) + ' older records stored locally.';
-      logCard.appendChild(more);
-    }
   }
 
   // Export all records as CSV
@@ -1519,29 +2321,84 @@ function renderResult() {
     const recs = getRecords();
     if (!recs.length) return;
     const cols = ['date','cmpRef','cmpId','commType','sewerInfra','manhole','pipeDiam','pipeDepth','offset','boundaryLoc','accessPassage','emergencyPassage','ppe'];
-    const csvRows = [cols.join(',')];
-    recs.forEach(r => csvRows.push(cols.map(c => '"' + (r[c]||'').replace(/"/g,'""') + '"').join(',')));
-    const blob = new Blob([csvRows.join('\n')], {type:'text/csv'});
+    const header = cols.join(',');
+    const rows = recs.map(r => cols.map(c => {
+      const val = String(r[c] || '').split('"').join('""');
+      return '"' + val + '"';
+    }).join(','));
+    const csv = [header].concat(rows).join('\n');
+    const blob = new Blob([csv], {type: 'text/csv'});
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = 'cmp-assessment-records.csv';
     a.click();
   };
-  logCard.appendChild(exportBtn);
 
-  // Clear records button
   const clearBtn = document.createElement('button');
   clearBtn.className = 'restart-btn';
   clearBtn.style.marginTop = '6px';
   clearBtn.textContent = '✕ Clear all records';
   clearBtn.onclick = () => {
-    if (confirm('Clear all saved records? This cannot be undone.')) {
-      localStorage.removeItem('cmp_records');
+      if (confirm('Clear all saved records? This cannot be undone.')) {
+        localStorage.removeItem('cmp_records');
       renderResult();
-    }
+ 
+  }
   };
   logCard.appendChild(clearBtn);
   right.appendChild(logCard);
+   // ── Feedback / comment card ───────────────────────────────────────────────
+  const fbCard = document.createElement('div');
+  fbCard.className = 'steps-card';
+  fbCard.style.marginTop = '14px';
+  const fbTitle = document.createElement('div');
+  fbTitle.className = 'steps-title';
+  fbTitle.textContent = 'Leave a comment or suggestion';
+  fbCard.appendChild(fbTitle);
+  const fbDesc = document.createElement('p');
+  fbDesc.style.cssText = 'font-size:12px;color:var(--muted);margin-bottom:10px;line-height:1.6;';
+  fbDesc.textContent = 'Improvements, issues or ideas? These are saved locally and can be reviewed as a summary.';
+  fbCard.appendChild(fbDesc);
+  const fbTa = document.createElement('textarea');
+  fbTa.rows = 3;
+  fbTa.placeholder = 'Type your comment here...';
+  fbTa.style.cssText = 'width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-family:inherit;font-size:12px;resize:vertical;outline:none;box-sizing:border-box;margin-bottom:8px;';
+  fbCard.appendChild(fbTa);
+  const fbBtn = document.createElement('button');
+  fbBtn.className = 'restart-btn';
+  fbBtn.style.cssText = 'width:100%;margin-top:0;padding:11px;background:var(--surface);';
+  fbBtn.textContent = 'Save comment';
+  fbBtn.onclick = () => {
+    const txt = fbTa.value.trim();
+    if (!txt) return;
+    try {
+      const existing = JSON.parse(localStorage.getItem('cmp_feedback') || '[]');
+      existing.push({
+        date: new Date().toISOString(),
+        cmpRef: answers[0] || '',
+        comment: txt
+      });
+      localStorage.setItem('cmp_feedback', JSON.stringify(existing));
+      fbTa.value = '';
+      fbBtn.textContent = '✓ Saved';
+      fbBtn.style.color = 'var(--yes-text)';
+      fbBtn.style.borderColor = 'var(--yes-border)';
+      setTimeout(() => { fbBtn.textContent = 'Save comment'; fbBtn.style.color = ''; fbBtn.style.borderColor = ''; }, 2500);
+    } catch(e) {}
+  };
+  fbCard.appendChild(fbBtn);
+
+  // Show feedback summary button if there are existing comments
+  const fbRecs = (() => { try { return JSON.parse(localStorage.getItem('cmp_feedback') || '[]'); } catch(e) { return []; } })();
+  if (fbRecs.length > 0) {
+    const fbSumBtn = document.createElement('button');
+    fbSumBtn.className = 'restart-btn';
+    fbSumBtn.style.cssText = 'width:100%;margin-top:6px;';
+    fbSumBtn.textContent = 'View ' + fbRecs.length + ' saved comment' + (fbRecs.length===1?'':'s');
+    fbSumBtn.onclick = () => showFeedbackSummary();
+    fbCard.appendChild(fbSumBtn);
+  }
+  right.appendChild(fbCard);
 
   const rb = document.createElement('button');
   rb.className = 'restart-btn';
@@ -1549,49 +2406,40 @@ function renderResult() {
   rb.textContent = '↺ New assessment';
   rb.onclick = () => { cur = 0; answers = []; render(); };
   right.appendChild(rb);
-
-  rg.appendChild(left);
+   rg.appendChild(left);
   rg.appendChild(right);
   sec.appendChild(rg);
-
   // ── Cross-section diagram (full width below the grid, only when sewer data exists) ──
   if (sewerIsYes() && answers[6] && answers[6] !== 'N/A') {
-    const diagSection = document.createElement('div');
+      const diagSection = document.createElement('div');
     diagSection.style.cssText = 'margin-top:28px;';
-
-    const diagLabel = document.createElement('div');
+     const diagLabel = document.createElement('div');
     diagLabel.className = 'prompt-label';
     diagLabel.style.marginBottom = '10px';
     diagLabel.textContent = 'Cross-section diagram';
     diagSection.appendChild(diagLabel);
-
-    // Action buttons row
+     // Action buttons row
     const fullActRow = document.createElement('div');
     fullActRow.style.cssText = 'display:flex;gap:10px;margin-bottom:10px;';
-
-    const fullSaveBtn = document.createElement('a');
+     const fullSaveBtn = document.createElement('a');
     fullSaveBtn.href = '#';
     fullSaveBtn.style.cssText = 'font-size:11px;color:var(--accent);text-decoration:none;font-weight:500;border:1px solid var(--accent);border-radius:6px;padding:4px 12px;transition:all 0.15s;';
     fullSaveBtn.textContent = '⬇ Save as JPG';
     fullSaveBtn.onclick = (e) => { e.preventDefault(); saveDiagramAsJPG('diagram-full'); };
-
-    const fullCopyBtn = document.createElement('a');
+     const fullCopyBtn = document.createElement('a');
     fullCopyBtn.href = '#';
     fullCopyBtn.style.cssText = 'font-size:11px;color:var(--muted);text-decoration:none;font-weight:500;border:1px solid var(--border);border-radius:6px;padding:4px 12px;transition:all 0.15s;';
     fullCopyBtn.textContent = '⎘ Copy image';
     fullCopyBtn.onclick = (e) => { e.preventDefault(); copyDiagramToClipboard('diagram-full'); };
-
-    fullActRow.appendChild(fullSaveBtn);
+     fullActRow.appendChild(fullSaveBtn);
     fullActRow.appendChild(fullCopyBtn);
     diagSection.appendChild(fullActRow);
-
-    const diagCard = document.createElement('div');
+     const diagCard = document.createElement('div');
     diagCard.id = 'diagram-full';
     diagCard.style.cssText = 'background:#ffffff;border:1px solid var(--border);border-radius:16px;padding:20px;overflow:hidden;';
     diagCard.innerHTML = buildCrossSectionSVG(false);
     diagSection.appendChild(diagCard);
-
-    sec.appendChild(diagSection);
+     sec.appendChild(diagSection);
   }
 
   main.appendChild(sec);
